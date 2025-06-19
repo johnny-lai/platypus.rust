@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+procyon = { path = "../procyon" }
 tokio.workspace = true

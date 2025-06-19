@@ -160,6 +160,10 @@ dependencies = [
 [[package]]
 name = "procyon"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tokio",
+]
 
 [[package]]
 name = "quote"
@@ -196,6 +200,7 @@ name = "server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "procyon",
  "tokio",
 ]
 

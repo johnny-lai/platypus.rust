@@ -1,4 +1,5 @@
 use anyhow::Result;
+use procyon::protocol::{self, Command};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
@@ -21,24 +22,24 @@ async fn main() -> Result<()> {
                     break;
                 }
 
-                let v: Vec<&str> = line.split(char::is_whitespace).collect();
-                match v[0] {
-                    "get" => {
-                        println!("command get got {}", v[1]);
+                match protocol::text::parse(&line) {
+                    Ok(Command::Get(key)) => {
+                        println!("command get got {}", key);
                         let value = "response";
                         writer
                             .write_all(
-                                format!("VALUE {} 0 {}\r\n{}\r\nEND\r\n", v[1], value.len(), value)
+                                format!("VALUE {} 0 {}\r\n{}\r\nEND\r\n", key, value.len(), value)
                                     .as_bytes(),
                             )
                             .await
                             .unwrap();
                     }
-                    "version" => {
+                    Ok(Command::Version) => {
+                        println!("version");
                         writer.write_all(b"VERSION 0.0.1\r\n").await.unwrap();
                     }
-                    _ => {
-                        println!("unknown command {}", line);
+                    Err(error) => {
+                        println!("unknown command {}", error);
                         writer.write_all(b"ERROR\r\n").await.unwrap();
                     }
                 }

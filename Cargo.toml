@@ -3,5 +3,5 @@ resolver = "3"
 members = ["procyon", "server"]
 
 [workspace.dependencies]
-anyhow = "1.0.98"
+anyhow = { version = "1.0.98", default-features = true }
 tokio = { version = "1.45.1", features = ["full"] }
