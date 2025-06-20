@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures::future::join_all;
-use procyon::Monitor;
-use procyon::protocol::{self, Command};
+use platypus::Monitor;
+use platypus::protocol::{self, Command};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;

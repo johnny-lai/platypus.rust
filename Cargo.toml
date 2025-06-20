@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["procyon", "server"]
+members = ["platypus", "server"]
 
 [workspace.dependencies]
 anyhow = { version = "1.0.98", default-features = true }
