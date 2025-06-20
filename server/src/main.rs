@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
 
                                 match protocol::text::parse(&line) {
                                     Ok(Command::Get(key)) => {
-                                        let s = Monitor::new(Duration::from_secs(2));
+                                        let s = Monitor::new(Duration::from_secs(2), key.clone());
                                         let (cancellation, join) = s.spawn(|| {
                                             "stuff"
                                         });
@@ -94,6 +94,7 @@ async fn main() -> Result<()> {
                                 }
                             }
                         }
+                        line.clear();
                     }
                 });
             }
