@@ -1,10 +1,15 @@
 use anyhow::Result;
+use futures::future::join_all;
+use procyon::Monitor;
 use procyon::protocol::{self, Command};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, Notify};
+use tokio::task::JoinHandle;
+use tokio::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,6 +34,8 @@ async fn main() -> Result<()> {
         }
     });
 
+    let handles = Arc::new(Mutex::new(Vec::new()));
+    let monitors = Arc::new(Mutex::new(Vec::new()));
     loop {
         tokio::select! {
             _ = notify_shutdown.notified() => {
@@ -37,6 +44,8 @@ async fn main() -> Result<()> {
 
             Ok((socket, _)) = listener.accept() => {
                 let notify = notify_shutdown.clone();
+                let handles = handles.clone();
+                let monitors = monitors.clone();
 
                 tokio::spawn(async move {
                     let (read_half, write_half) = socket.into_split();
@@ -57,6 +66,13 @@ async fn main() -> Result<()> {
 
                                 match protocol::text::parse(&line) {
                                     Ok(Command::Get(key)) => {
+                                        let s = Monitor::new(Duration::from_secs(2));
+                                        let (cancellation, join) = s.spawn(|| {
+                                            "stuff"
+                                        });
+                                        monitors.lock().await.push(cancellation);
+                                        handles.lock().await.push(join);
+
                                         println!("command get got {}", key);
                                         let value = "response";
                                         writer
@@ -83,5 +99,13 @@ async fn main() -> Result<()> {
             }
         }
     }
+
+    // Shutdown
+    for c in monitors.lock().await.iter() {
+        c.cancel();
+    }
+    let handles = handles.lock().await.drain(..).collect::<Vec<_>>();
+    join_all(handles).await;
+
     Ok(())
 }
