@@ -1,21 +1,18 @@
 use anyhow::Result;
 use futures::future::join_all;
-use platypus::Monitor;
+use platypus::{Monitor, MonitorTask};
 use platypus::protocol::{self, Command, Item, Response};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, tcp::OwnedWriteHalf};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{Mutex, Notify};
-use tokio::task::JoinHandle;
 use tokio::time::Duration;
-use tokio_util::sync::CancellationToken;
 
 async fn handle_command(
     command: Command,
     writer: &mut OwnedWriteHalf,
-    monitors: &Arc<Mutex<Vec<CancellationToken>>>,
-    handles: &Arc<Mutex<Vec<JoinHandle<()>>>>,
+    monitor_tasks: &Arc<Mutex<Vec<MonitorTask<String>>>>,
 ) -> bool {
     match command {
         Command::Get(keys) => {
@@ -23,16 +20,23 @@ async fn handle_command(
             // Simulate getting data for each key
             for key in &keys {
                 let s = Monitor::new(Duration::from_secs(2), key.clone());
-                let (cancellation, join) = s.spawn(|| "stuff");
-                monitors.lock().await.push(cancellation);
-                handles.lock().await.push(join);
+                let monitor_task = s.spawn(|| "stuff".to_string());
+                
+                // Get the current value or trigger a fresh computation
+                let value = if let Some(cached_value) = monitor_task.last_value().await {
+                    cached_value
+                } else {
+                    monitor_task.get().await
+                };
+                
+                monitor_tasks.lock().await.push(monitor_task);
 
                 // Create a sample item
                 let item = Item {
                     key: key.clone(),
                     flags: 0,
                     exptime: 0,
-                    data: b"sample_value".to_vec(),
+                    data: value.into_bytes(),
                     cas: None,
                 };
                 let response = Response::Value(item);
@@ -185,8 +189,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    let handles = Arc::new(Mutex::new(Vec::new()));
-    let monitors = Arc::new(Mutex::new(Vec::new()));
+    let monitor_tasks: Arc<Mutex<Vec<MonitorTask<String>>>> = Arc::new(Mutex::new(Vec::new()));
     loop {
         tokio::select! {
             _ = notify_shutdown.notified() => {
@@ -195,8 +198,7 @@ async fn main() -> Result<()> {
 
             Ok((socket, _)) = listener.accept() => {
                 let notify = notify_shutdown.clone();
-                let handles = handles.clone();
-                let monitors = monitors.clone();
+                let monitor_tasks = monitor_tasks.clone();
 
                 tokio::spawn(async move {
                     let (read_half, write_half) = socket.into_split();
@@ -217,7 +219,7 @@ async fn main() -> Result<()> {
 
                                 match protocol::parse(&line) {
                                     Ok(command) => {
-                                        let should_close = handle_command(command, &mut writer, &monitors, &handles).await;
+                                        let should_close = handle_command(command, &mut writer, &monitor_tasks).await;
                                         if should_close {
                                             break;
                                         }
@@ -237,11 +239,13 @@ async fn main() -> Result<()> {
     }
 
     // Shutdown
-    for c in monitors.lock().await.iter() {
-        c.cancel();
+    let tasks = monitor_tasks.lock().await.drain(..).collect::<Vec<_>>();
+    for task in &tasks {
+        task.cancel();
     }
-    let handles = handles.lock().await.drain(..).collect::<Vec<_>>();
-    join_all(handles).await;
+    // Wait for all monitor tasks to complete
+    let join_handles: Vec<_> = tasks.into_iter().map(|task| async move { task.join().await }).collect();
+    join_all(join_handles).await;
 
     Ok(())
 }
