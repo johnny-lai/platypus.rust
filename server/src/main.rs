@@ -1,10 +1,10 @@
 use anyhow::Result;
 use futures::future::join_all;
 use platypus::Monitor;
-use platypus::protocol::{self, Command, Response, Item};
+use platypus::protocol::{self, Command, Item, Response};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, tcp::{OwnedWriteHalf}};
+use tokio::net::{TcpListener, tcp::OwnedWriteHalf};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinHandle;
@@ -26,7 +26,7 @@ async fn handle_command(
                 let (cancellation, join) = s.spawn(|| "stuff");
                 monitors.lock().await.push(cancellation);
                 handles.lock().await.push(join);
-                
+
                 // Create a sample item
                 let item = Item {
                     key: key.clone(),
@@ -36,10 +36,13 @@ async fn handle_command(
                     cas: None,
                 };
                 let response = Response::Value(item);
-                writer.write_all(response.format().as_bytes()).await.unwrap();
+                writer
+                    .write_all(response.format().as_bytes())
+                    .await
+                    .unwrap();
             }
             writer.write_all(b"END\r\n").await.unwrap();
-        },
+        }
         Command::Gets(keys) => {
             println!("GETS command with keys: {:?}", keys);
             let mut items = Vec::new();
@@ -54,8 +57,11 @@ async fn handle_command(
                 items.push(item);
             }
             let response = Response::Values(items);
-            writer.write_all(response.format().as_bytes()).await.unwrap();
-        },
+            writer
+                .write_all(response.format().as_bytes())
+                .await
+                .unwrap();
+        }
         Command::Gat(exptime, keys) => {
             println!("GAT command with exptime {} and keys: {:?}", exptime, keys);
             let mut items = Vec::new();
@@ -70,8 +76,11 @@ async fn handle_command(
                 items.push(item);
             }
             let response = Response::Values(items);
-            writer.write_all(response.format().as_bytes()).await.unwrap();
-        },
+            writer
+                .write_all(response.format().as_bytes())
+                .await
+                .unwrap();
+        }
         Command::Gats(exptime, keys) => {
             println!("GATS command with exptime {} and keys: {:?}", exptime, keys);
             let mut items = Vec::new();
@@ -86,8 +95,11 @@ async fn handle_command(
                 items.push(item);
             }
             let response = Response::Values(items);
-            writer.write_all(response.format().as_bytes()).await.unwrap();
-        },
+            writer
+                .write_all(response.format().as_bytes())
+                .await
+                .unwrap();
+        }
         Command::MetaGet(key, flags) => {
             println!("META GET command with key: {} and flags: {:?}", key, flags);
             let item = Item {
@@ -98,18 +110,27 @@ async fn handle_command(
                 cas: Some(12345),
             };
             let response = Response::MetaValue(item, flags);
-            writer.write_all(response.format().as_bytes()).await.unwrap();
-        },
+            writer
+                .write_all(response.format().as_bytes())
+                .await
+                .unwrap();
+        }
         Command::MetaNoOp => {
             println!("META NOOP command");
             let response = Response::MetaNoOp;
-            writer.write_all(response.format().as_bytes()).await.unwrap();
-        },
+            writer
+                .write_all(response.format().as_bytes())
+                .await
+                .unwrap();
+        }
         Command::Version => {
             println!("VERSION command");
             let response = Response::Version("0.1.0".to_string());
-            writer.write_all(response.format().as_bytes()).await.unwrap();
-        },
+            writer
+                .write_all(response.format().as_bytes())
+                .await
+                .unwrap();
+        }
         Command::Stats(arg) => {
             println!("STATS command with arg: {:?}", arg);
             let stats = vec![
@@ -120,17 +141,23 @@ async fn handle_command(
                 ("cmd_set".to_string(), "0".to_string()),
             ];
             let response = Response::Stats(stats);
-            writer.write_all(response.format().as_bytes()).await.unwrap();
-        },
+            writer
+                .write_all(response.format().as_bytes())
+                .await
+                .unwrap();
+        }
         Command::Touch(key, exptime) => {
             println!("TOUCH command with key: {} exptime: {}", key, exptime);
             let response = Response::Touched;
-            writer.write_all(response.format().as_bytes()).await.unwrap();
-        },
+            writer
+                .write_all(response.format().as_bytes())
+                .await
+                .unwrap();
+        }
         Command::Quit => {
             println!("QUIT command - closing connection");
             return true; // Signal that connection should close
-        },
+        }
     }
     false // Continue processing commands
 }
