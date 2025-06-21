@@ -1,5 +1,5 @@
 use memcache::{Stream, ToMemcacheValue};
-use std::{fmt::Display, str::FromStr};
+use std::fmt::Display;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
