@@ -1,5 +1,11 @@
 # platypus
 
+```
+          __,---"""----..,,_
+  _,...--'                o `====
+ `-___..3>/...____...--3>/''
+```
+
 Periodically fetches answers in the background into memcached
 * On `get`, platypus will start fetching in the background and updating the "target" memcache, with a TTL
 * After a certain time the TTL on the target will expire, and then new `get` requests will come back to platypus.
