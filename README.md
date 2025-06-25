@@ -22,7 +22,22 @@ Client --> McRouter/memcached-proxy ---> target memcache
                                       actual service
 ```
 
-## Sources
+## Example
+
+Start a platypus server that:
+* Listens on port `11212`.
+* Any get returns `format!("value_for_{}", key)`
+* Result is written to memcached on port `11213`
+
+```
+Server::bind("127.0.0.1:11212")
+    .getter(|key: &str| format!("value_for_{}", key))
+    .target("memcache://127.0.0.1:11213")
+    .run()
+    .await
+```
+
+## Configuration files
 
 ```
 [get.<get_name>]
