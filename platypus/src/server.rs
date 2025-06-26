@@ -1,7 +1,7 @@
+use crate::Error;
 use crate::monitor::MonitorTask;
 use crate::protocol::{self, Command, Item, Response};
 use anyhow::Result;
-use futures::future::join_all;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -21,7 +21,7 @@ pub struct Server<F> {
 
 impl<F> Server<F>
 where
-    F: Fn(&str) -> String + Send + Sync + 'static,
+    F: Fn(&str) -> Result<String, Error> + Send + Sync + 'static,
 {
     pub fn bind(listen_address: &str) -> Self {
         Self {
@@ -64,10 +64,21 @@ where
             }
         });
 
+        let mut monitor_interval = tokio::time::interval(Duration::from_secs(1));
+
         loop {
             tokio::select! {
                 _ = self.notify_shutdown.notified() => {
                     break;
+                }
+
+                _ = monitor_interval.tick() => {
+                    let mut tasks = self.monitor_tasks.lock().await;
+                    for task in tasks.values_mut() {
+                        if !task.has_expired() {
+                            let _ = task.tick().await;
+                        }
+                    }
                 }
 
                 Ok((socket, _)) = listener.accept() => {
@@ -114,24 +125,6 @@ where
             }
         }
 
-        // Shutdown
-        let tasks = self
-            .monitor_tasks
-            .lock()
-            .await
-            .drain()
-            .map(|(_, task)| task)
-            .collect::<Vec<_>>();
-        for task in &tasks {
-            task.cancel();
-        }
-        // Wait for all monitor tasks to complete
-        let join_handles: Vec<_> = tasks
-            .into_iter()
-            .map(|task| async move { task.join().await })
-            .collect();
-        join_all(join_handles).await;
-
         Ok(())
     }
 
@@ -140,28 +133,39 @@ where
         getter: &Arc<F>,
         target_address: &Option<String>,
         monitor_tasks: &Arc<Mutex<HashMap<String, MonitorTask<String>>>>,
-    ) -> Option<String> {
+    ) -> Result<String, Error> {
         let mut tasks = monitor_tasks.lock().await;
 
         // Check if we already have a MonitorTask for this key
-        if let Some(task) = tasks.get(key) {
+        if let Some(ref mut task) = tasks.get_mut(key) {
+            task.touch();
+
             // Return the last cached value
-            return task.last_result().await;
+            match task.last_result() {
+                Some(ret) => return Ok(ret),
+                _ => {}
+            }
         }
 
         // Create new MonitorTask for this key
         let getter_clone = getter.clone();
-        let mut monitor_task = MonitorTask::new(move |key: &str| -> String { getter_clone(key) })
-            .interval(Duration::from_secs(5))
-            .key(key);
+        let mut monitor_task =
+            MonitorTask::new(move |key: &str| -> Result<String, Error> { getter_clone(key) })
+                .interval(Duration::from_secs(5))
+                .key(key);
 
         if let Some(target_address) = target_address {
             let client = memcache::Client::connect(target_address.as_str()).unwrap();
             monitor_task = monitor_task.target(client);
         }
 
+        // Touch
+        monitor_task.touch();
+
         // Get the current value or trigger a fresh computation
         let value = monitor_task.get().await;
+
+        // Keep monitor_task
         tasks.insert(key.to_string(), monitor_task);
         value
     }
@@ -179,7 +183,7 @@ where
                     println!("GET command with keys: {:?}", keys);
                     // Get data for each key using existing or new MonitorTask
                     for key in &keys {
-                        if let Some(value) = Self::get_or_create_monitor_task(
+                        match Self::get_or_create_monitor_task(
                             key,
                             getter,
                             target_address,
@@ -187,18 +191,21 @@ where
                         )
                         .await
                         {
-                            let item = Item {
-                                key: key.clone(),
-                                flags: 0,
-                                exptime: 0,
-                                data: value.into_bytes(),
-                                cas: None,
-                            };
-                            let response = Response::Value(item);
-                            writer
-                                .write_all(response.format().as_bytes())
-                                .await
-                                .unwrap();
+                            Ok(value) => {
+                                let item = Item {
+                                    key: key.clone(),
+                                    flags: 0,
+                                    exptime: 0,
+                                    data: value.into_bytes(),
+                                    cas: None,
+                                };
+                                let response = Response::Value(item);
+                                writer
+                                    .write_all(response.format().as_bytes())
+                                    .await
+                                    .unwrap();
+                            }
+                            Err(_err) => {}
                         }
                     }
                     writer.write_all(b"END\r\n").await.unwrap();
@@ -207,7 +214,7 @@ where
                     println!("GETS command with keys: {:?}", keys);
                     let mut items = Vec::new();
                     for key in &keys {
-                        if let Some(value) = Self::get_or_create_monitor_task(
+                        match Self::get_or_create_monitor_task(
                             key,
                             getter,
                             target_address,
@@ -215,14 +222,17 @@ where
                         )
                         .await
                         {
-                            let item = Item {
-                                key: key.clone(),
-                                flags: 0,
-                                exptime: 0,
-                                data: value.into_bytes(),
-                                cas: Some(12345), // Include CAS for gets
-                            };
-                            items.push(item);
+                            Ok(value) => {
+                                let item = Item {
+                                    key: key.clone(),
+                                    flags: 0,
+                                    exptime: 0,
+                                    data: value.into_bytes(),
+                                    cas: Some(12345), // Include CAS for gets
+                                };
+                                items.push(item);
+                            }
+                            Err(_err) => {}
                         }
                     }
                     let response = Response::Values(items);
@@ -272,7 +282,7 @@ where
                 Command::MetaGet(key, flags) => {
                     println!("META GET command with key: {} and flags: {:?}", key, flags);
                     // Get data for key using existing or new MonitorTask
-                    if let Some(value) = Self::get_or_create_monitor_task(
+                    if let Ok(value) = Self::get_or_create_monitor_task(
                         &key,
                         getter,
                         target_address,
