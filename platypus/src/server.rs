@@ -64,7 +64,7 @@ where
             }
         });
 
-        let mut monitor_interval = tokio::time::interval(Duration::from_secs(5));
+        let mut monitor_interval = tokio::time::interval(Duration::from_secs(1));
 
         loop {
             tokio::select! {
@@ -73,10 +73,10 @@ where
                 }
 
                 _ = monitor_interval.tick() => {
-                    let tasks = self.monitor_tasks.lock().await;
-                    for task in tasks.values() {
-                        if !task.has_expired().await {
-                            let _ = task.get().await;
+                    let mut tasks = self.monitor_tasks.lock().await;
+                    for task in tasks.values_mut() {
+                        if !task.has_expired() {
+                            let _ = task.tick().await;
                         }
                     }
                 }
@@ -137,11 +137,11 @@ where
         let mut tasks = monitor_tasks.lock().await;
 
         // Check if we already have a MonitorTask for this key
-        if let Some(task) = tasks.get(key) {
-            task.touch().await;
+        if let Some(ref mut task) = tasks.get_mut(key) {
+            task.touch();
 
             // Return the last cached value
-            match task.last_result().await {
+            match task.last_result() {
                 Some(ret) => return Ok(ret),
                 _ => {}
             }
@@ -160,7 +160,7 @@ where
         }
 
         // Touch
-        monitor_task.touch().await;
+        monitor_task.touch();
 
         // Get the current value or trigger a fresh computation
         let value = monitor_task.get().await;
