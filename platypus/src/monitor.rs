@@ -1,20 +1,36 @@
 use crate::Error;
+use crate::writer::Writer;
 use memcache::{Stream, ToMemcacheValue};
 use std::fmt::Display;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 
-#[derive(Clone)]
 pub struct MonitorTask<V> {
-    target: Option<memcache::Client>,
-    interval: tokio::time::Duration,
-    ttl: tokio::time::Duration,
-    until: tokio::time::Instant,
-    updated_at: tokio::time::Instant,
+    // Period at getter will be called to refresh the value
+    interval: Duration,
+
+    // Duration key on the target should be kept for
+    // This should be greater than interval.
+    // Every usage of getter will keep the refresh monitor alive for this period of time
+    ttl: Duration,
+
+    // Refresh will keep running until this instant
+    until: Instant,
+
+    // Last time refresh occurred
+    updated_at: Instant,
+
+    // The key the value will be written to in the target
     pub key: Option<String>,
 
+    // Last result getter returned
     last_result: Option<V>,
+
+    // Result
     getter: Arc<dyn Fn(&str) -> Result<V, Error> + Send + Sync>,
+
+    // The target where updated values will be written to
+    target: Option<Arc<Writer<V>>>,
 }
 
 impl<V> MonitorTask<V>
@@ -57,9 +73,9 @@ where
             match (self.getter)(key) {
                 Ok(value) => {
                     self.last_result = Some(value.clone());
-                    // Write to target if any
-                    if let Some(ref target) = self.target {
-                        _ = target.set(&key, value.clone(), self.ttl.as_secs() as u32);
+                    if let Some(target) = &self.target {
+                        let value = value.clone();
+                        target.send(key, value, self.ttl).ok();
                     }
                     Ok(value)
                 }
@@ -82,8 +98,8 @@ where
         true
     }
 
-    pub fn target(mut self, client: memcache::Client) -> Self {
-        self.target = Some(client);
+    pub fn target(mut self, target: Arc<Writer<V>>) -> Self {
+        self.target = Some(target);
         self
     }
 
@@ -127,7 +143,7 @@ mod tests {
         assert!(!task.has_expired());
 
         // Wait for expiry
-        sleep(Duration::from_millis(50));
+        sleep(Duration::from_millis(50)).await;
         assert!(!task.has_expired()); // Still not expired due to 12s default TTL
     }
 
