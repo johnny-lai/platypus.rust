@@ -19,7 +19,7 @@ pub struct Server<F> {
 
 impl<F> Server<F>
 where
-    F: Fn(&str) -> Result<String, Error> + Send + Sync + 'static,
+    F: Fn(&str) -> Result<String, Error> + Clone + Send + Sync + 'static,
 {
     pub fn bind(listen_address: &str) -> Self {
         Self {
@@ -42,8 +42,10 @@ where
     }
 
     pub async fn run(self) -> Result<()> {
-        let listener = TcpListener::bind(self.listen_address).await?;
-        let writer = Arc::new(Writer::new());
+        let listener = TcpListener::bind(self.listen_address.clone()).await?;
+        let target = Some(Arc::new(Writer::<String>::new(
+            self.target_address.clone().unwrap().as_ref(),
+        )));
 
         // Trigger shutdown on Ctrl+C
         let notify_shutdown_on_ctrl_c = self.notify_shutdown.clone();
@@ -65,6 +67,7 @@ where
 
         let mut monitor_interval = tokio::time::interval(Duration::from_secs(1));
 
+        let self_for_loop = self.clone();
         loop {
             tokio::select! {
                 _ = self.notify_shutdown.notified() => {
@@ -81,11 +84,12 @@ where
                 }
 
                 Ok((socket, _)) = listener.accept() => {
-                    let notify = self.notify_shutdown.clone();
-                    let monitor_tasks = self.monitor_tasks.clone();
-                    let getter = self.getter.clone();
-                    let target_address = self.target_address.clone();
-                    let writer_sender = writer.clone();
+                    let mut self_for_loop = self_for_loop.clone();
+
+                    let notify = self_for_loop.notify_shutdown.clone();
+
+                    let _target_address: Option<String> = None;
+                    let target = target.clone();
 
                     tokio::spawn(async move {
                         let (read_half, write_half) = socket.into_split();
@@ -106,7 +110,7 @@ where
 
                                     match protocol::parse(&line) {
                                         Ok(command) => {
-                                            let should_close = Self::handle_command_static(command, &mut writer, &monitor_tasks, &target_address, &getter, &writer_sender).await;
+                                            let should_close = self_for_loop.handle_command(command, &mut writer, &target).await;
                                             if should_close {
                                                 break;
                                             }
@@ -126,21 +130,22 @@ where
         }
 
         // Shutdown the writer thread and wait for jobs to complete
-        if let Ok(writer) = Arc::try_unwrap(writer) {
-            writer.shutdown();
+        if let Some(target) = target {
+            if let Ok(writer) = Arc::try_unwrap(target) {
+                writer.shutdown();
+            }
         }
 
         Ok(())
     }
 
     async fn get_or_create_monitor_task(
+        &self,
         key: &str,
         getter: &Arc<F>,
-        target_address: &Option<String>,
-        monitor_tasks: &Arc<Mutex<HashMap<String, MonitorTask<String>>>>,
-        writer: &Arc<Writer>,
+        target_writer: &Option<Arc<Writer<String>>>,
     ) -> Result<String, Error> {
-        let mut tasks = monitor_tasks.lock().await;
+        let mut tasks = self.monitor_tasks.lock().await;
 
         // Check if we already have a MonitorTask for this key
         if let Some(ref mut task) = tasks.get_mut(key) {
@@ -160,12 +165,9 @@ where
                 .interval(Duration::from_secs(5))
                 .key(key);
 
-        if let Some(target_address) = target_address {
-            let client = memcache::Client::connect(target_address.as_str()).unwrap();
-            monitor_task = monitor_task.target(client);
+        if let Some(target_writer) = target_writer {
+            monitor_task = monitor_task.target(target_writer.clone());
         }
-
-        monitor_task = monitor_task.writer(writer.clone());
 
         // Touch
         monitor_task.touch();
@@ -178,28 +180,21 @@ where
         value
     }
 
-    async fn handle_command_static(
+    async fn handle_command(
+        &mut self,
         command: Command,
         writer: &mut OwnedWriteHalf,
-        monitor_tasks: &Arc<Mutex<HashMap<String, MonitorTask<String>>>>,
-        target_address: &Option<String>,
-        getter: &Option<Arc<F>>,
-        writer_sender: &Arc<Writer>,
+        target_writer: &Option<Arc<Writer<String>>>,
     ) -> bool {
-        if let Some(getter) = getter {
+        if let Some(getter) = &self.getter {
             match command {
                 Command::Get(keys) => {
                     println!("GET command with keys: {:?}", keys);
                     // Get data for each key using existing or new MonitorTask
                     for key in &keys {
-                        match Self::get_or_create_monitor_task(
-                            key,
-                            getter,
-                            target_address,
-                            monitor_tasks,
-                            writer_sender,
-                        )
-                        .await
+                        match self
+                            .get_or_create_monitor_task(key, getter, target_writer)
+                            .await
                         {
                             Ok(value) => {
                                 let item = Item {
@@ -224,14 +219,9 @@ where
                     println!("GETS command with keys: {:?}", keys);
                     let mut items = Vec::new();
                     for key in &keys {
-                        match Self::get_or_create_monitor_task(
-                            key,
-                            getter,
-                            target_address,
-                            monitor_tasks,
-                            writer_sender,
-                        )
-                        .await
+                        match self
+                            .get_or_create_monitor_task(key, getter, target_writer)
+                            .await
                         {
                             Ok(value) => {
                                 let item = Item {
@@ -293,14 +283,9 @@ where
                 Command::MetaGet(key, flags) => {
                     println!("META GET command with key: {} and flags: {:?}", key, flags);
                     // Get data for key using existing or new MonitorTask
-                    if let Ok(value) = Self::get_or_create_monitor_task(
-                        &key,
-                        getter,
-                        target_address,
-                        monitor_tasks,
-                        writer_sender,
-                    )
-                    .await
+                    if let Ok(value) = self
+                        .get_or_create_monitor_task(&key, getter, target_writer)
+                        .await
                     {
                         let item = Item {
                             key: key.clone(),
@@ -365,6 +350,21 @@ where
             false // Continue processing commands
         } else {
             true // Signal that connection should close
+        }
+    }
+}
+
+impl<F> Clone for Server<F>
+where
+    F: Fn(&str) -> Result<String, Error> + Send + Sync + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            listen_address: self.listen_address.clone(),
+            target_address: self.target_address.clone(),
+            getter: self.getter.clone(),
+            monitor_tasks: self.monitor_tasks.clone(),
+            notify_shutdown: self.notify_shutdown.clone(),
         }
     }
 }

@@ -6,16 +6,31 @@ use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 
 pub struct MonitorTask<V> {
-    target: Option<memcache::Client>,
-    interval: tokio::time::Duration,
-    ttl: tokio::time::Duration,
-    until: tokio::time::Instant,
-    updated_at: tokio::time::Instant,
+    // Period at getter will be called to refresh the value
+    interval: Duration,
+
+    // Duration key on the target should be kept for
+    // This should be greater than interval.
+    // Every usage of getter will keep the refresh monitor alive for this period of time
+    ttl: Duration,
+
+    // Refresh will keep running until this instant
+    until: Instant,
+
+    // Last time refresh occurred
+    updated_at: Instant,
+
+    // The key the value will be written to in the target
     pub key: Option<String>,
 
+    // Last result getter returned
     last_result: Option<V>,
+
+    // Result
     getter: Arc<dyn Fn(&str) -> Result<V, Error> + Send + Sync>,
-    writer: Option<Arc<Writer>>,
+
+    // The target where updated values will be written to
+    target: Option<Arc<Writer<V>>>,
 }
 
 impl<V> MonitorTask<V>
@@ -37,7 +52,6 @@ where
             key: None,
             last_result: None,
             getter,
-            writer: None,
         }
     }
 
@@ -59,16 +73,9 @@ where
             match (self.getter)(key) {
                 Ok(value) => {
                     self.last_result = Some(value.clone());
-                    if let (Some(client), Some(writer)) = (&self.target, &self.writer) {
-                        let client = client.clone();
-                        let key = key.clone();
+                    if let Some(target) = &self.target {
                         let value = value.clone();
-                        let ttl = self.ttl.as_secs() as u32;
-                        writer
-                            .send(Box::new(move || {
-                                let _ = client.set(&key, value, ttl);
-                            }))
-                            .ok();
+                        target.send(key, value, self.ttl).ok();
                     }
                     Ok(value)
                 }
@@ -91,8 +98,8 @@ where
         true
     }
 
-    pub fn target(mut self, client: memcache::Client) -> Self {
-        self.target = Some(client);
+    pub fn target(mut self, target: Arc<Writer<V>>) -> Self {
+        self.target = Some(target);
         self
     }
 
@@ -103,11 +110,6 @@ where
 
     pub fn key(mut self, key: &str) -> Self {
         self.key = Some(key.into());
-        self
-    }
-
-    pub fn writer(mut self, writer: Arc<Writer>) -> Self {
-        self.writer = Some(writer);
         self
     }
 }

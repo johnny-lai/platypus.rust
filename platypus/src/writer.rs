@@ -1,31 +1,45 @@
+use memcache::{Stream, ToMemcacheValue};
 use std::sync::mpsc::{Sender, channel};
 use std::thread::JoinHandle;
+use tokio::time::Duration;
 
-type WriteJob = Box<dyn FnOnce() + Send + 'static>;
+#[derive(Clone)]
+pub struct WriteJob<V> {
+    key: String,
+    value: V,
+    ttl_secs: u32,
+}
 
-pub struct Writer {
-    sender: Sender<WriteJob>,
+pub struct Writer<V> {
+    sender: Sender<WriteJob<V>>,
     shutdown_sender: Sender<()>,
     handle: JoinHandle<()>,
 }
 
-impl Writer {
-    pub fn new() -> Self {
-        let (tx, rx) = channel::<WriteJob>();
+impl<V> Writer<V>
+where
+    V: ToMemcacheValue<Stream> + Send + Sync + 'static,
+{
+    pub fn new(target_address: &str) -> Self {
+        let (tx, rx) = channel::<WriteJob<V>>();
         let (shutdown_tx, shutdown_rx) = channel::<()>();
 
+        let client = memcache::Client::connect(target_address).unwrap();
+
         let handle = std::thread::Builder::new()
-            .name("platypus-memcache-writer".to_string())
+            .name(format!("writer/{}", target_address))
             .spawn(move || {
                 loop {
                     match rx.try_recv() {
-                        Ok(job) => job(),
+                        Ok(job) => {
+                            _ = client.set(job.key.as_str(), job.value, job.ttl_secs);
+                        }
                         Err(std::sync::mpsc::TryRecvError::Empty) => {
                             // Check for shutdown signal
                             if shutdown_rx.try_recv().is_ok() {
                                 // Process remaining jobs before shutting down
                                 while let Ok(job) = rx.try_recv() {
-                                    job();
+                                    _ = client.set(job.key.as_str(), job.value, job.ttl_secs);
                                 }
                                 break;
                             }
@@ -35,7 +49,7 @@ impl Writer {
                         Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                             // Process remaining jobs before shutting down
                             while let Ok(job) = rx.try_recv() {
-                                job();
+                                _ = client.set(job.key.as_str(), job.value, job.ttl_secs);
                             }
                             break;
                         }
@@ -51,7 +65,18 @@ impl Writer {
         }
     }
 
-    pub fn send(&self, job: WriteJob) -> Result<(), std::sync::mpsc::SendError<WriteJob>> {
+    pub fn send(
+        &self,
+        key: &str,
+        value: V,
+        ttl: Duration,
+    ) -> Result<(), std::sync::mpsc::SendError<WriteJob<V>>> {
+        let ttl_secs = ttl.as_secs() as u32;
+        let job = WriteJob {
+            key: key.into(),
+            value,
+            ttl_secs,
+        };
         self.sender.send(job)
     }
 
