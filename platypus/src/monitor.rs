@@ -1,10 +1,10 @@
 use crate::Error;
+use crate::writer::Writer;
 use memcache::{Stream, ToMemcacheValue};
 use std::fmt::Display;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 
-#[derive(Clone)]
 pub struct MonitorTask<V> {
     target: Option<memcache::Client>,
     interval: tokio::time::Duration,
@@ -15,6 +15,7 @@ pub struct MonitorTask<V> {
 
     last_result: Option<V>,
     getter: Arc<dyn Fn(&str) -> Result<V, Error> + Send + Sync>,
+    writer: Option<Arc<Writer>>,
 }
 
 impl<V> MonitorTask<V>
@@ -36,6 +37,7 @@ where
             key: None,
             last_result: None,
             getter,
+            writer: None,
         }
     }
 
@@ -57,9 +59,16 @@ where
             match (self.getter)(key) {
                 Ok(value) => {
                     self.last_result = Some(value.clone());
-                    // Write to target if any
-                    if let Some(ref target) = self.target {
-                        _ = target.set(&key, value.clone(), self.ttl.as_secs() as u32);
+                    if let (Some(client), Some(writer)) = (&self.target, &self.writer) {
+                        let client = client.clone();
+                        let key = key.clone();
+                        let value = value.clone();
+                        let ttl = self.ttl.as_secs() as u32;
+                        writer
+                            .send(Box::new(move || {
+                                let _ = client.set(&key, value, ttl);
+                            }))
+                            .ok();
                     }
                     Ok(value)
                 }
@@ -96,6 +105,11 @@ where
         self.key = Some(key.into());
         self
     }
+
+    pub fn writer(mut self, writer: Arc<Writer>) -> Self {
+        self.writer = Some(writer);
+        self
+    }
 }
 
 #[cfg(test)]
@@ -127,7 +141,7 @@ mod tests {
         assert!(!task.has_expired());
 
         // Wait for expiry
-        sleep(Duration::from_millis(50));
+        sleep(Duration::from_millis(50)).await;
         assert!(!task.has_expired()); // Still not expired due to 12s default TTL
     }
 

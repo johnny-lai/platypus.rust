@@ -1,6 +1,5 @@
-use crate::Error;
-use crate::monitor::MonitorTask;
 use crate::protocol::{self, Command, Item, Response};
+use crate::{Error, MonitorTask, Writer};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,7 +9,6 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{Mutex, Notify};
 use tokio::time::Duration;
 
-#[derive(Default)]
 pub struct Server<F> {
     listen_address: String,
     target_address: Option<String>,
@@ -45,6 +43,7 @@ where
 
     pub async fn run(self) -> Result<()> {
         let listener = TcpListener::bind(self.listen_address).await?;
+        let writer = Arc::new(Writer::new());
 
         // Trigger shutdown on Ctrl+C
         let notify_shutdown_on_ctrl_c = self.notify_shutdown.clone();
@@ -86,6 +85,7 @@ where
                     let monitor_tasks = self.monitor_tasks.clone();
                     let getter = self.getter.clone();
                     let target_address = self.target_address.clone();
+                    let writer_sender = writer.clone();
 
                     tokio::spawn(async move {
                         let (read_half, write_half) = socket.into_split();
@@ -106,7 +106,7 @@ where
 
                                     match protocol::parse(&line) {
                                         Ok(command) => {
-                                            let should_close = Self::handle_command_static(command, &mut writer, &monitor_tasks, &target_address, &getter).await;
+                                            let should_close = Self::handle_command_static(command, &mut writer, &monitor_tasks, &target_address, &getter, &writer_sender).await;
                                             if should_close {
                                                 break;
                                             }
@@ -125,6 +125,11 @@ where
             }
         }
 
+        // Shutdown the writer thread and wait for jobs to complete
+        if let Ok(writer) = Arc::try_unwrap(writer) {
+            writer.shutdown();
+        }
+
         Ok(())
     }
 
@@ -133,6 +138,7 @@ where
         getter: &Arc<F>,
         target_address: &Option<String>,
         monitor_tasks: &Arc<Mutex<HashMap<String, MonitorTask<String>>>>,
+        writer: &Arc<Writer>,
     ) -> Result<String, Error> {
         let mut tasks = monitor_tasks.lock().await;
 
@@ -159,6 +165,8 @@ where
             monitor_task = monitor_task.target(client);
         }
 
+        monitor_task = monitor_task.writer(writer.clone());
+
         // Touch
         monitor_task.touch();
 
@@ -176,6 +184,7 @@ where
         monitor_tasks: &Arc<Mutex<HashMap<String, MonitorTask<String>>>>,
         target_address: &Option<String>,
         getter: &Option<Arc<F>>,
+        writer_sender: &Arc<Writer>,
     ) -> bool {
         if let Some(getter) = getter {
             match command {
@@ -188,6 +197,7 @@ where
                             getter,
                             target_address,
                             monitor_tasks,
+                            writer_sender,
                         )
                         .await
                         {
@@ -219,6 +229,7 @@ where
                             getter,
                             target_address,
                             monitor_tasks,
+                            writer_sender,
                         )
                         .await
                         {
@@ -287,6 +298,7 @@ where
                         getter,
                         target_address,
                         monitor_tasks,
+                        writer_sender,
                     )
                     .await
                     {
