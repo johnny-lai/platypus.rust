@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+clap.workspace = true
 futures.workspace = true
 platypus = { path = "../platypus" }
 tokio.workspace = true
