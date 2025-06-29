@@ -22,6 +22,7 @@ async fn main() -> Result<()> {
     Server::bind(&args.bind)
         .getter(|key: &str| Ok(format!("value_for_{} {:?}", key, Instant::now())))
         .target(&args.target)
+        .version(env!("CARGO_PKG_VERSION"))
         .run()
         .await
 }

@@ -10,9 +10,11 @@ use tokio::sync::{Mutex, Notify};
 use tokio::time::Duration;
 
 pub struct Server<F> {
+    getter: Option<Arc<F>>,
     listen_address: String,
     target_address: Option<String>,
-    getter: Option<Arc<F>>,
+    version: String,
+
     monitor_tasks: Arc<Mutex<HashMap<String, MonitorTask<String>>>>,
     notify_shutdown: Arc<Notify>,
 }
@@ -30,9 +32,10 @@ where
     /// A new Server instance ready for configuration
     pub fn bind(listen_address: &str) -> Self {
         Self {
+            getter: None,
             listen_address: listen_address.to_owned(),
             target_address: None,
-            getter: None,
+            version: "0.0.0".into(),
             monitor_tasks: Arc::new(Mutex::new(HashMap::new())),
             notify_shutdown: Arc::new(Notify::new()),
         }
@@ -65,6 +68,19 @@ where
     /// Self for method chaining
     pub fn target(mut self, target_address: &str) -> Self {
         self.target_address = Some(target_address.to_owned());
+        self
+    }
+
+    /// Sets the version that will be returned from the VERSION command.
+    /// This defaults to "0.0.0".
+    ///
+    /// # Arguments
+    /// * `version` - The target memcached server address
+    ///
+    /// # Returns
+    /// Self for method chaining
+    pub fn version(mut self, version: &str) -> Self {
+        self.version = version.into();
         self
     }
 
@@ -341,7 +357,7 @@ where
                 }
                 Command::Version => {
                     println!("VERSION command");
-                    Ok(Some(Response::Version("0.1.0".to_string())))
+                    Ok(Some(Response::Version(self.version.clone())))
                 }
                 Command::Stats(arg) => {
                     println!("STATS command with arg: {:?}", arg);
@@ -375,9 +391,10 @@ where
 {
     fn clone(&self) -> Self {
         Self {
+            getter: self.getter.clone(),
             listen_address: self.listen_address.clone(),
             target_address: self.target_address.clone(),
-            getter: self.getter.clone(),
+            version: self.version.clone(),
             monitor_tasks: self.monitor_tasks.clone(),
             notify_shutdown: self.notify_shutdown.clone(),
         }
