@@ -57,3 +57,21 @@ action = GET
 host = localhost
 port = 11213
 ```
+
+## Compatibility with Rails.cache
+
+To allow the Rails.cache to be able to read raw values, you can try configuring it as follows:
+
+```
+config.cache_store = :mem_cache_store, { serializer: :passthrough, raw: true }
+```
+
+* `raw: true` is to tell `MemCacheStore` not to expect the result to be wrapped in an `Entry` object.
+* `serializer: :passthrough` is to tell `MemCacheStore` not to serialize. Rails can serialize with different
+  formats like `:marshal_6_1`, `:marshal_7_0`, `:marshal_7_1`, `:message_pack`.
+
+## Todos
+
+* Allow different `getter` based on the key accessed.
+* Allow for multiple `getter`.
+* Allow TTLs to be configured
