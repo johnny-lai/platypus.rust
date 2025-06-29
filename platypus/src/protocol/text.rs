@@ -4,14 +4,14 @@ use anyhow::{Result, anyhow};
 pub fn parse(line: &String) -> Result<Command> {
     let line = line.trim();
     if line.is_empty() {
-        return Err(anyhow!("empty command"));
+        return Err(ParseError::NoCommand.into());
     }
-    
+
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.is_empty() {
-        return Err(anyhow!("empty command"));
+        return Err(ParseError::NoCommand.into());
     }
-    
+
     match parts[0] {
         // Retrieval commands
         "get" => {
@@ -20,33 +20,35 @@ pub fn parse(line: &String) -> Result<Command> {
             }
             let keys = parts[1..].iter().map(|s| s.to_string()).collect();
             Ok(Command::Get(keys))
-        },
+        }
         "gets" => {
             if parts.len() < 2 {
                 return Err(anyhow!("gets requires at least one key"));
             }
             let keys = parts[1..].iter().map(|s| s.to_string()).collect();
             Ok(Command::Gets(keys))
-        },
+        }
         "gat" => {
             if parts.len() < 3 {
                 return Err(anyhow!("gat requires exptime and at least one key"));
             }
-            let exptime = parts[1].parse::<u32>()
+            let exptime = parts[1]
+                .parse::<u32>()
                 .map_err(|_| anyhow!("invalid exptime in gat command"))?;
             let keys = parts[2..].iter().map(|s| s.to_string()).collect();
             Ok(Command::Gat(exptime, keys))
-        },
+        }
         "gats" => {
             if parts.len() < 3 {
                 return Err(anyhow!("gats requires exptime and at least one key"));
             }
-            let exptime = parts[1].parse::<u32>()
+            let exptime = parts[1]
+                .parse::<u32>()
                 .map_err(|_| anyhow!("invalid exptime in gats command"))?;
             let keys = parts[2..].iter().map(|s| s.to_string()).collect();
             Ok(Command::Gats(exptime, keys))
-        },
-        
+        }
+
         // Administrative commands
         "version" => Ok(Command::Version),
         "stats" => {
@@ -56,18 +58,19 @@ pub fn parse(line: &String) -> Result<Command> {
                 None
             };
             Ok(Command::Stats(arg))
-        },
+        }
         "touch" => {
             if parts.len() != 3 {
                 return Err(anyhow!("touch requires key and exptime"));
             }
             let key = parts[1].to_string();
-            let exptime = parts[2].parse::<u32>()
+            let exptime = parts[2]
+                .parse::<u32>()
                 .map_err(|_| anyhow!("invalid exptime in touch command"))?;
             Ok(Command::Touch(key, exptime))
-        },
+        }
         "quit" => Ok(Command::Quit),
-        
+
         _ => Err(anyhow!("unknown command: {}", parts[0])),
     }
 }
@@ -85,7 +88,14 @@ mod tests {
     #[test]
     fn test_get_multiple_keys() {
         let result = parse(&"get key1 key2 key3".to_string()).unwrap();
-        assert_eq!(result, Command::Get(vec!["key1".to_string(), "key2".to_string(), "key3".to_string()]));
+        assert_eq!(
+            result,
+            Command::Get(vec![
+                "key1".to_string(),
+                "key2".to_string(),
+                "key3".to_string()
+            ])
+        );
     }
 
     #[test]
@@ -103,7 +113,10 @@ mod tests {
     #[test]
     fn test_gats_command() {
         let result = parse(&"gats 3600 key1 key2".to_string()).unwrap();
-        assert_eq!(result, Command::Gats(3600, vec!["key1".to_string(), "key2".to_string()]));
+        assert_eq!(
+            result,
+            Command::Gats(3600, vec!["key1".to_string(), "key2".to_string()])
+        );
     }
 
     #[test]

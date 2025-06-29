@@ -1,4 +1,4 @@
-use crate::protocol::{self, Command, Item, Response};
+use crate::protocol::{self, Command, Item, ParseError, Response};
 use crate::{Error, MonitorTask, Writer};
 use anyhow::Result;
 use std::collections::HashMap;
@@ -103,20 +103,16 @@ where
                                     break;
                                 }
 
-                                bytes = reader.read_line(&mut line) => {
-                                    if bytes.unwrap_or(0) == 0 {
-                                        break;
-                                    }
-
-                                    match protocol::parse(&line) {
+                                data = protocol::recv_command(&mut reader) => {
+                                    match data {
                                         Ok(command) => {
-                                            let should_close = self_for_loop.handle_command(command, &mut writer, &target).await;
-                                            if should_close {
+                                            if self_for_loop.handle_command(command, &mut writer, &target).await {
                                                 break;
                                             }
                                         }
-                                        Err(error) => {
-                                            println!("Parse error: {}", error);
+                                        Err(e) if matches!(e.downcast_ref::<ParseError>(), Some(ParseError::NoCommand)) => {}
+                                        Err(e) => {
+                                            println!("Parse error: {}", e);
                                             writer.write_all(b"ERROR\r\n").await.unwrap();
                                         }
                                     }
