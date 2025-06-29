@@ -10,9 +10,11 @@ use tokio::sync::{Mutex, Notify};
 use tokio::time::Duration;
 
 pub struct Server<F> {
+    getter: Option<Arc<F>>,
     listen_address: String,
     target_address: Option<String>,
-    getter: Option<Arc<F>>,
+    version: String,
+
     monitor_tasks: Arc<Mutex<HashMap<String, MonitorTask<String>>>>,
     notify_shutdown: Arc<Notify>,
 }
@@ -21,26 +23,80 @@ impl<F> Server<F>
 where
     F: Fn(&str) -> Result<String, Error> + Clone + Send + Sync + 'static,
 {
+    /// Creates a new Server instance bound to the specified listen address.
+    ///
+    /// # Arguments
+    /// * `listen_address` - The address to bind the server to (e.g., "127.0.0.1:11212")
+    ///
+    /// # Returns
+    /// A new Server instance ready for configuration
     pub fn bind(listen_address: &str) -> Self {
         Self {
+            getter: None,
             listen_address: listen_address.to_owned(),
             target_address: None,
-            getter: None,
+            version: "0.0.0".into(),
             monitor_tasks: Arc::new(Mutex::new(HashMap::new())),
             notify_shutdown: Arc::new(Notify::new()),
         }
     }
 
+    /// Sets the getter function for custom value retrieval.
+    ///
+    /// The getter function is called when a key is requested and not found in cache.
+    /// It should return a Result containing the value for the given key.
+    ///
+    /// # Arguments
+    /// * `f` - A function that takes a key (&str) and returns Result<String, Error>
+    ///
+    /// # Returns
+    /// Self for method chaining
     pub fn getter(mut self, f: F) -> Self {
         self.getter = Some(Arc::new(f));
         self
     }
 
+    /// Sets the target memcached server address for operation forwarding.
+    ///
+    /// When set, certain operations may be forwarded to the target server.
+    /// The address should be in the format "memcache://host:port".
+    ///
+    /// # Arguments
+    /// * `target_address` - The target memcached server address
+    ///
+    /// # Returns
+    /// Self for method chaining
     pub fn target(mut self, target_address: &str) -> Self {
         self.target_address = Some(target_address.to_owned());
         self
     }
 
+    /// Sets the version that will be returned from the VERSION command.
+    /// This defaults to "0.0.0".
+    ///
+    /// # Arguments
+    /// * `version` - The target memcached server address
+    ///
+    /// # Returns
+    /// Self for method chaining
+    pub fn version(mut self, version: &str) -> Self {
+        self.version = version.into();
+        self
+    }
+
+    /// Starts the memcached server and handles incoming connections.
+    ///
+    /// This method starts the TCP server, sets up signal handling for graceful shutdown,
+    /// and processes memcached protocol commands from clients. It will run until
+    /// a shutdown signal (SIGINT or SIGTERM) is received.
+    ///
+    /// # Returns
+    /// Result<()> - Ok(()) on successful shutdown, Err on startup or runtime errors
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The TCP listener cannot bind to the specified address
+    /// - Network I/O errors occur during operation
     pub async fn run(self) -> Result<()> {
         let listener = TcpListener::bind(self.listen_address.clone()).await?;
         let target = Some(Arc::new(Writer::<String>::new(
@@ -301,7 +357,7 @@ where
                 }
                 Command::Version => {
                     println!("VERSION command");
-                    Ok(Some(Response::Version("0.1.0".to_string())))
+                    Ok(Some(Response::Version(self.version.clone())))
                 }
                 Command::Stats(arg) => {
                     println!("STATS command with arg: {:?}", arg);
@@ -335,9 +391,10 @@ where
 {
     fn clone(&self) -> Self {
         Self {
+            getter: self.getter.clone(),
             listen_address: self.listen_address.clone(),
             target_address: self.target_address.clone(),
-            getter: self.getter.clone(),
+            version: self.version.clone(),
             monitor_tasks: self.monitor_tasks.clone(),
             notify_shutdown: self.notify_shutdown.clone(),
         }
