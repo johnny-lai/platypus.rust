@@ -1,10 +1,10 @@
-use crate::protocol::{self, Command, Item, Response};
+use crate::protocol::{self, Command, Item, ParseError, Response};
 use crate::{Error, MonitorTask, Writer};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, tcp::OwnedWriteHalf};
+use tokio::io::{AsyncWriteExt, BufReader};
+use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{Mutex, Notify};
 use tokio::time::Duration;
@@ -103,21 +103,33 @@ where
                                     break;
                                 }
 
-                                bytes = reader.read_line(&mut line) => {
-                                    if bytes.unwrap_or(0) == 0 {
-                                        break;
-                                    }
-
-                                    match protocol::parse(&line) {
-                                        Ok(command) => {
-                                            let should_close = self_for_loop.handle_command(command, &mut writer, &target).await;
-                                            if should_close {
-                                                break;
+                                data = protocol::recv_command(&mut reader) => {
+                                    match data {
+                                        Ok(command_context) => {
+                                            match self_for_loop.handle_command(command_context.command, &target).await {
+                                                Ok(Some(response)) => {
+                                                    let response_data = response.serialize(&command_context.protocol);
+                                                    writer.write_all(&response_data).await.unwrap();
+                                                }
+                                                Ok(None) => {
+                                                    // Quit command - break the loop
+                                                    break;
+                                                }
+                                                Err(e) => {
+                                                    println!("Command handling error: {}", e);
+                                                    let error_response = protocol::Response::Error(e.to_string());
+                                                    let response_data = error_response.serialize(&command_context.protocol);
+                                                    writer.write_all(&response_data).await.unwrap();
+                                                }
                                             }
                                         }
-                                        Err(error) => {
-                                            println!("Parse error: {}", error);
-                                            writer.write_all(b"ERROR\r\n").await.unwrap();
+                                        Err(e) if matches!(e.downcast_ref::<ParseError>(), Some(ParseError::NoCommand)) => {}
+                                        Err(e) => {
+                                            println!("Parse error: {}", e);
+                                            // Default to text protocol for parse errors
+                                            let error_response = protocol::Response::Error("Parse error".to_string());
+                                            let response_data = error_response.serialize(&protocol::ProtocolType::Text);
+                                            writer.write_all(&response_data).await.unwrap();
                                         }
                                     }
                                 }
@@ -183,14 +195,14 @@ where
     async fn handle_command(
         &mut self,
         command: Command,
-        writer: &mut OwnedWriteHalf,
         target_writer: &Option<Arc<Writer<String>>>,
-    ) -> bool {
+    ) -> anyhow::Result<Option<Response>> {
         if let Some(getter) = &self.getter {
             match command {
                 Command::Get(keys) => {
                     println!("GET command with keys: {:?}", keys);
                     // Get data for each key using existing or new MonitorTask
+                    let mut items = Vec::new();
                     for key in &keys {
                         match self
                             .get_or_create_monitor_task(key, getter, target_writer)
@@ -204,16 +216,12 @@ where
                                     data: value.into_bytes(),
                                     cas: None,
                                 };
-                                let response = Response::Value(item);
-                                writer
-                                    .write_all(response.format().as_bytes())
-                                    .await
-                                    .unwrap();
+                                items.push(item);
                             }
                             Err(_err) => {}
                         }
                     }
-                    writer.write_all(b"END\r\n").await.unwrap();
+                    Ok(Some(Response::Values(items)))
                 }
                 Command::Gets(keys) => {
                     println!("GETS command with keys: {:?}", keys);
@@ -236,11 +244,7 @@ where
                             Err(_err) => {}
                         }
                     }
-                    let response = Response::Values(items);
-                    writer
-                        .write_all(response.format().as_bytes())
-                        .await
-                        .unwrap();
+                    Ok(Some(Response::Values(items)))
                 }
                 Command::Gat(exptime, keys) => {
                     println!("GAT command with exptime {} and keys: {:?}", exptime, keys);
@@ -255,11 +259,7 @@ where
                         };
                         items.push(item);
                     }
-                    let response = Response::Values(items);
-                    writer
-                        .write_all(response.format().as_bytes())
-                        .await
-                        .unwrap();
+                    Ok(Some(Response::Values(items)))
                 }
                 Command::Gats(exptime, keys) => {
                     println!("GATS command with exptime {} and keys: {:?}", exptime, keys);
@@ -274,11 +274,7 @@ where
                         };
                         items.push(item);
                     }
-                    let response = Response::Values(items);
-                    writer
-                        .write_all(response.format().as_bytes())
-                        .await
-                        .unwrap();
+                    Ok(Some(Response::Values(items)))
                 }
                 Command::MetaGet(key, flags) => {
                     println!("META GET command with key: {} and flags: {:?}", key, flags);
@@ -294,30 +290,18 @@ where
                             data: value.into_bytes(),
                             cas: Some(12345),
                         };
-                        let response = Response::MetaValue(item, flags);
-                        writer
-                            .write_all(response.format().as_bytes())
-                            .await
-                            .unwrap();
+                        Ok(Some(Response::MetaValue(item, flags)))
+                    } else {
+                        Ok(Some(Response::MetaEnd))
                     }
-
-                    writer.write_all(b"END\r\n").await.unwrap();
                 }
                 Command::MetaNoOp => {
                     println!("META NOOP command");
-                    let response = Response::MetaNoOp;
-                    writer
-                        .write_all(response.format().as_bytes())
-                        .await
-                        .unwrap();
+                    Ok(Some(Response::MetaNoOp))
                 }
                 Command::Version => {
                     println!("VERSION command");
-                    let response = Response::Version("0.1.0".to_string());
-                    writer
-                        .write_all(response.format().as_bytes())
-                        .await
-                        .unwrap();
+                    Ok(Some(Response::Version("0.1.0".to_string())))
                 }
                 Command::Stats(arg) => {
                     println!("STATS command with arg: {:?}", arg);
@@ -328,28 +312,19 @@ where
                         ("cmd_get".to_string(), "0".to_string()),
                         ("cmd_set".to_string(), "0".to_string()),
                     ];
-                    let response = Response::Stats(stats);
-                    writer
-                        .write_all(response.format().as_bytes())
-                        .await
-                        .unwrap();
+                    Ok(Some(Response::Stats(stats)))
                 }
                 Command::Touch(key, exptime) => {
                     println!("TOUCH command with key: {} exptime: {}", key, exptime);
-                    let response = Response::Touched;
-                    writer
-                        .write_all(response.format().as_bytes())
-                        .await
-                        .unwrap();
+                    Ok(Some(Response::Touched))
                 }
                 Command::Quit => {
                     println!("QUIT command - closing connection");
-                    return true; // Signal that connection should close
+                    Ok(None) // Signal that connection should close
                 }
             }
-            false // Continue processing commands
         } else {
-            true // Signal that connection should close
+            Err(anyhow::anyhow!("No getter function configured"))
         }
     }
 }

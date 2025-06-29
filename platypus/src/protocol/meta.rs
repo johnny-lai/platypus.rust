@@ -4,14 +4,14 @@ use anyhow::{Result, anyhow};
 pub fn parse(line: &String) -> Result<Command> {
     let line = line.trim();
     if line.is_empty() {
-        return Err(anyhow!("empty command"));
+        return Err(ParseError::NoCommand.into());
     }
-    
+
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.is_empty() {
-        return Err(anyhow!("empty command"));
+        return Err(ParseError::NoCommand.into());
     }
-    
+
     match parts[0] {
         "mg" => {
             if parts.len() < 2 {
@@ -24,20 +24,20 @@ pub fn parse(line: &String) -> Result<Command> {
                 Vec::new()
             };
             Ok(Command::MetaGet(key, flags))
-        },
+        }
         "mn" => {
             if parts.len() != 1 {
                 return Err(anyhow!("mn takes no arguments"));
             }
             Ok(Command::MetaNoOp)
-        },
+        }
         _ => Err(anyhow!("unknown meta command: {}", parts[0])),
     }
 }
 
 fn parse_meta_flags(flag_parts: &[&str]) -> Result<Vec<MetaFlag>> {
     let mut flags = Vec::new();
-    
+
     for part in flag_parts {
         // Handle flags with tokens
         if part.starts_with('O') {
@@ -48,22 +48,26 @@ fn parse_meta_flags(flag_parts: &[&str]) -> Result<Vec<MetaFlag>> {
             flags.push(MetaFlag::Opaque(token));
         } else if part.starts_with('N') {
             let token = &part[1..];
-            let ttl = token.parse::<u32>()
+            let ttl = token
+                .parse::<u32>()
                 .map_err(|_| anyhow!("N flag requires numeric TTL"))?;
             flags.push(MetaFlag::VivifyOnMiss(ttl));
         } else if part.starts_with('R') {
             let token = &part[1..];
-            let ttl = token.parse::<u32>()
+            let ttl = token
+                .parse::<u32>()
                 .map_err(|_| anyhow!("R flag requires numeric TTL"))?;
             flags.push(MetaFlag::RecacheWin(ttl));
         } else if part.starts_with('T') {
             let token = &part[1..];
-            let ttl = token.parse::<u32>()
+            let ttl = token
+                .parse::<u32>()
                 .map_err(|_| anyhow!("T flag requires numeric TTL"))?;
             flags.push(MetaFlag::UpdateTtl(ttl));
         } else if part.starts_with('E') {
             let token = &part[1..];
-            let cas = token.parse::<u64>()
+            let cas = token
+                .parse::<u64>()
                 .map_err(|_| anyhow!("E flag requires numeric CAS"))?;
             flags.push(MetaFlag::SetCas(cas));
         } else {
@@ -86,7 +90,7 @@ fn parse_meta_flags(flag_parts: &[&str]) -> Result<Vec<MetaFlag>> {
             }
         }
     }
-    
+
     Ok(flags)
 }
 
@@ -103,35 +107,53 @@ mod tests {
     #[test]
     fn test_mg_with_simple_flags() {
         let result = parse(&"mg mykey v".to_string()).unwrap();
-        assert_eq!(result, Command::MetaGet("mykey".to_string(), vec![MetaFlag::ReturnValue]));
+        assert_eq!(
+            result,
+            Command::MetaGet("mykey".to_string(), vec![MetaFlag::ReturnValue])
+        );
     }
 
     #[test]
     fn test_mg_with_multiple_flags() {
         let result = parse(&"mg mykey vck".to_string()).unwrap();
-        assert_eq!(result, Command::MetaGet("mykey".to_string(), vec![
-            MetaFlag::ReturnValue,
-            MetaFlag::ReturnCas,
-            MetaFlag::ReturnKey
-        ]));
+        assert_eq!(
+            result,
+            Command::MetaGet(
+                "mykey".to_string(),
+                vec![
+                    MetaFlag::ReturnValue,
+                    MetaFlag::ReturnCas,
+                    MetaFlag::ReturnKey
+                ]
+            )
+        );
     }
 
     #[test]
     fn test_mg_with_opaque_flag() {
         let result = parse(&"mg mykey v Otest123".to_string()).unwrap();
-        assert_eq!(result, Command::MetaGet("mykey".to_string(), vec![
-            MetaFlag::ReturnValue,
-            MetaFlag::Opaque("test123".to_string())
-        ]));
+        assert_eq!(
+            result,
+            Command::MetaGet(
+                "mykey".to_string(),
+                vec![
+                    MetaFlag::ReturnValue,
+                    MetaFlag::Opaque("test123".to_string())
+                ]
+            )
+        );
     }
 
     #[test]
     fn test_mg_with_ttl_flags() {
         let result = parse(&"mg mykey N3600 R1800".to_string()).unwrap();
-        assert_eq!(result, Command::MetaGet("mykey".to_string(), vec![
-            MetaFlag::VivifyOnMiss(3600),
-            MetaFlag::RecacheWin(1800)
-        ]));
+        assert_eq!(
+            result,
+            Command::MetaGet(
+                "mykey".to_string(),
+                vec![MetaFlag::VivifyOnMiss(3600), MetaFlag::RecacheWin(1800)]
+            )
+        );
     }
 
     #[test]

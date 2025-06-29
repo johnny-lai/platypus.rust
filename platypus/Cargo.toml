@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+byteorder.workspace = true
 futures.workspace = true
 memcache.workspace = true
 thiserror.workspace = true
