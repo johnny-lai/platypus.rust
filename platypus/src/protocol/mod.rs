@@ -6,6 +6,19 @@ pub mod binary;
 pub mod meta;
 pub mod text;
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum ProtocolType {
+    Text,
+    Binary { opaque: u32 },
+    Meta,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct CommandContext {
+    pub command: Command,
+    pub protocol: ProtocolType,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Command {
     // Retrieval commands
@@ -81,6 +94,20 @@ pub enum Response {
 }
 
 impl Response {
+    pub fn serialize(&self, protocol: &ProtocolType) -> Vec<u8> {
+        match protocol {
+            ProtocolType::Text | ProtocolType::Meta => self.format().into_bytes(),
+            ProtocolType::Binary { opaque } => self.serialize_binary(*opaque),
+        }
+    }
+
+    fn serialize_binary(&self, opaque: u32) -> Vec<u8> {
+        binary::serialize_binary_response(self, opaque).unwrap_or_else(|_| {
+            // Fallback to a simple error response if serialization fails
+            b"ERROR\r\n".to_vec()
+        })
+    }
+
     pub fn format(&self) -> String {
         match self {
             Response::Value(item) => {
@@ -185,7 +212,7 @@ pub enum ParseError {
     Other(#[from] anyhow::Error),
 }
 
-pub async fn recv_command<R>(reader: &mut R) -> Result<Command>
+pub async fn recv_command<R>(reader: &mut R) -> Result<CommandContext>
 where
     R: AsyncBufReadExt + Unpin,
 {
@@ -195,10 +222,13 @@ where
     } else if data[0] == 0x80 || data[0] == 0x81 {
         // Binary protocol - magic byte 0x80 (request) or 0x81 (response)
         // Header is 24 bytes
-        match binary::parse_binary_command(data) {
-            Ok((command, consumed)) => {
+        match binary::parse_binary(data) {
+            Ok((command, opaque, consumed)) => {
                 reader.consume(consumed);
-                Ok(command)
+                Ok(CommandContext {
+                    command,
+                    protocol: ProtocolType::Binary { opaque },
+                })
             }
             Err(err) => Err(err),
         }
@@ -206,12 +236,12 @@ where
         // Text or Meta protocol
         let mut line = String::new();
         _ = reader.read_line(&mut line).await?;
-        return parse_text(&line);
+        parse_text(&line)
     }
 }
 
 /// Parse text-based protocol (text or meta)
-pub fn parse_text(line: &str) -> anyhow::Result<Command> {
+pub fn parse_text(line: &str) -> anyhow::Result<CommandContext> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return Err(ParseError::NoCommand.into());
@@ -219,27 +249,38 @@ pub fn parse_text(line: &str) -> anyhow::Result<Command> {
 
     // Try meta commands first (mg, mn)
     if trimmed.starts_with("mg ") || trimmed == "mn" {
-        return meta::parse(&trimmed.to_string());
+        let command = meta::parse(&trimmed.to_string())?;
+        Ok(CommandContext {
+            protocol: ProtocolType::Meta,
+            command,
+        })
+    } else {
+        // Fall back to text protocol
+        let command = text::parse(&trimmed.to_string())?;
+        Ok(CommandContext {
+            protocol: ProtocolType::Text,
+            command,
+        })
     }
-
-    // Fall back to text protocol
-    text::parse(&trimmed.to_string())
 }
 
 /// Parse any protocol type (binary, text, or meta) from raw bytes
 pub fn parse_any(data: &[u8]) -> anyhow::Result<Command> {
+    if data.is_empty() {
+        return Err(anyhow!("empty data"));
+    }
+
     // Check if it's binary protocol by looking at the magic byte
-    if !data.is_empty() && (data[0] == 0x80 || data[0] == 0x81) {
+    if data[0] == 0x80 || data[0] == 0x81 {
         // Binary protocol - magic byte 0x80 (request) or 0x81 (response)
-        return match binary::parse_binary_command(data) {
-            Ok((command, _)) => Ok(command),
+        return match binary::parse_binary(data) {
+            Ok((command, _, _)) => Ok(command),
             Err(err) => Err(err),
         };
     }
 
     // Try to parse as text/meta protocol
-    let text =
-        std::str::from_utf8(data).map_err(|_| anyhow::anyhow!("Invalid UTF-8 in text protocol"))?;
+    let text = std::str::from_utf8(data).map_err(|_| anyhow!("Invalid UTF-8 in text protocol"))?;
 
     let trimmed = text.trim();
     if trimmed.is_empty() {

@@ -4,50 +4,50 @@ use std::io::{Cursor, Read, Write};
 
 use super::{Command, Response};
 
-// Binary protocol constants
-const MAGIC_REQUEST: u8 = 0x80;
-const MAGIC_RESPONSE: u8 = 0x81;
+// Binary protocol pub constants
+pub const MAGIC_REQUEST: u8 = 0x80;
+pub const MAGIC_RESPONSE: u8 = 0x81;
 
 // Opcodes for commands that exist in our protocol
-const OPCODE_GET: u8 = 0x00;
-const OPCODE_SET: u8 = 0x01;
+pub const OPCODE_GET: u8 = 0x00;
+pub const OPCODE_SET: u8 = 0x01;
 #[allow(dead_code)]
-const OPCODE_ADD: u8 = 0x02;
+pub const OPCODE_ADD: u8 = 0x02;
 #[allow(dead_code)]
-const OPCODE_REPLACE: u8 = 0x03;
-const OPCODE_DELETE: u8 = 0x04;
+pub const OPCODE_REPLACE: u8 = 0x03;
+pub const OPCODE_DELETE: u8 = 0x04;
 #[allow(dead_code)]
-const OPCODE_INCREMENT: u8 = 0x05;
+pub const OPCODE_INCREMENT: u8 = 0x05;
 #[allow(dead_code)]
-const OPCODE_DECREMENT: u8 = 0x06;
-const OPCODE_QUIT: u8 = 0x07;
+pub const OPCODE_DECREMENT: u8 = 0x06;
+pub const OPCODE_QUIT: u8 = 0x07;
 #[allow(dead_code)]
-const OPCODE_FLUSH: u8 = 0x08;
+pub const OPCODE_FLUSH: u8 = 0x08;
 #[allow(dead_code)]
-const OPCODE_GETQ: u8 = 0x09;
-const OPCODE_NOOP: u8 = 0x0a;
-const OPCODE_VERSION: u8 = 0x0b;
-const OPCODE_GETK: u8 = 0x0c;
+pub const OPCODE_GETQ: u8 = 0x09;
+pub const OPCODE_NOOP: u8 = 0x0a;
+pub const OPCODE_VERSION: u8 = 0x0b;
+pub const OPCODE_GETK: u8 = 0x0c;
 #[allow(dead_code)]
-const OPCODE_GETKQ: u8 = 0x0d;
+pub const OPCODE_GETKQ: u8 = 0x0d;
 #[allow(dead_code)]
-const OPCODE_APPEND: u8 = 0x0e;
+pub const OPCODE_APPEND: u8 = 0x0e;
 #[allow(dead_code)]
-const OPCODE_PREPEND: u8 = 0x0f;
-const OPCODE_STAT: u8 = 0x10;
+pub const OPCODE_PREPEND: u8 = 0x0f;
+pub const OPCODE_STAT: u8 = 0x10;
 
 // Response status codes
-const STATUS_SUCCESS: u16 = 0x0000;
-const STATUS_KEY_NOT_FOUND: u16 = 0x0001;
-const STATUS_KEY_EXISTS: u16 = 0x0002;
+pub const STATUS_SUCCESS: u16 = 0x0000;
+pub const STATUS_KEY_NOT_FOUND: u16 = 0x0001;
+pub const STATUS_KEY_EXISTS: u16 = 0x0002;
 #[allow(dead_code)]
-const STATUS_VALUE_TOO_LARGE: u16 = 0x0003;
-const STATUS_INVALID_ARGUMENTS: u16 = 0x0004;
-const STATUS_ITEM_NOT_STORED: u16 = 0x0005;
+pub const STATUS_VALUE_TOO_LARGE: u16 = 0x0003;
+pub const STATUS_INVALID_ARGUMENTS: u16 = 0x0004;
+pub const STATUS_ITEM_NOT_STORED: u16 = 0x0005;
 #[allow(dead_code)]
-const STATUS_INCR_DECR_NON_NUMERIC: u16 = 0x0006;
-const STATUS_UNKNOWN_COMMAND: u16 = 0x0081;
-const STATUS_OUT_OF_MEMORY: u16 = 0x0082;
+pub const STATUS_INCR_DECR_NON_NUMERIC: u16 = 0x0006;
+pub const STATUS_UNKNOWN_COMMAND: u16 = 0x0081;
+pub const STATUS_OUT_OF_MEMORY: u16 = 0x0082;
 
 // Binary packet header structure
 #[derive(Debug, Clone)]
@@ -142,7 +142,9 @@ impl BinaryHeader {
     }
 }
 
-pub fn parse_binary_command(data: &[u8]) -> Result<(Command, usize)> {
+/// Returns the command, opaque and number of bytes used in data.
+/// opaque will be copied back into the response.
+pub fn parse_binary(data: &[u8]) -> Result<(Command, u32, usize)> {
     if data.len() < 24 {
         return Err(anyhow!("Binary packet too small"));
     }
@@ -153,6 +155,9 @@ pub fn parse_binary_command(data: &[u8]) -> Result<(Command, usize)> {
     if header.magic != MAGIC_REQUEST {
         return Err(anyhow!("Invalid magic byte for request"));
     }
+
+    // Read opaque
+    let opaque = header.opaque;
 
     // Read body components
     let mut extras = vec![0u8; header.extras_length as usize];
@@ -179,7 +184,11 @@ pub fn parse_binary_command(data: &[u8]) -> Result<(Command, usize)> {
             if value_length != 0 {
                 return Err(anyhow!("Get command must not have value"));
             }
-            Ok((Command::Get(vec![key_str]), cursor.position() as usize))
+            Ok((
+                Command::Get(vec![key_str]),
+                opaque,
+                cursor.position() as usize,
+            ))
         }
         OPCODE_VERSION => {
             if header.extras_length != 0 || header.key_length != 0 || value_length != 0 {
@@ -187,13 +196,13 @@ pub fn parse_binary_command(data: &[u8]) -> Result<(Command, usize)> {
                     "Version command must not have extras, key, or value"
                 ));
             }
-            Ok((Command::Version, cursor.position() as usize))
+            Ok((Command::Version, opaque, cursor.position() as usize))
         }
         OPCODE_QUIT => {
             if header.extras_length != 0 || header.key_length != 0 || value_length != 0 {
                 return Err(anyhow!("Quit command must not have extras, key, or value"));
             }
-            Ok((Command::Quit, cursor.position() as usize))
+            Ok((Command::Quit, opaque, cursor.position() as usize))
         }
         OPCODE_STAT => {
             if header.extras_length != 0 {
@@ -207,7 +216,11 @@ pub fn parse_binary_command(data: &[u8]) -> Result<(Command, usize)> {
             } else {
                 None
             };
-            Ok((Command::Stats(stats_arg), cursor.position() as usize))
+            Ok((
+                Command::Stats(stats_arg),
+                opaque,
+                cursor.position() as usize,
+            ))
         }
         OPCODE_DELETE => {
             if header.extras_length != 0 {
@@ -220,7 +233,11 @@ pub fn parse_binary_command(data: &[u8]) -> Result<(Command, usize)> {
                 return Err(anyhow!("Delete command must not have value"));
             }
             // Note: Binary protocol doesn't support touch directly, using placeholder exptime
-            Ok((Command::Touch(key_str, 0), cursor.position() as usize))
+            Ok((
+                Command::Touch(key_str, 0),
+                opaque,
+                cursor.position() as usize,
+            ))
         }
         _ => Err(anyhow!(
             "Unsupported binary command opcode: {}",
@@ -377,7 +394,7 @@ mod tests {
         header.write_to(&mut packet).unwrap();
         packet.extend_from_slice(b"Hello");
 
-        let cmd = parse_binary_command(&packet).unwrap();
+        let (cmd, _opaque, _consumed) = parse_binary(&packet).unwrap();
         match cmd {
             Command::Get(keys) => {
                 assert_eq!(keys.len(), 1);
@@ -393,7 +410,7 @@ mod tests {
         let header = BinaryHeader::new_request(OPCODE_VERSION, 0, 0, 0);
         header.write_to(&mut packet).unwrap();
 
-        let cmd = parse_binary_command(&packet).unwrap();
+        let (cmd, _opaque, _consumed) = parse_binary(&packet).unwrap();
         assert!(matches!(cmd, Command::Version));
     }
 
