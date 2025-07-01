@@ -29,7 +29,9 @@ pub struct MonitorTask<V> {
     last_result: Option<V>,
 
     // Result
-    getter: Arc<dyn Fn(&str) -> Pin<Box<dyn Future<Output = Result<V, Error>> + Send + '_>> + Send + Sync>,
+    getter: Arc<
+        dyn Fn(&str) -> Pin<Box<dyn Future<Output = anyhow::Result<V>> + Send + '_>> + Send + Sync,
+    >,
 
     // The target where updated values will be written to
     target: Option<Arc<Writer<V>>>,
@@ -41,7 +43,10 @@ where
 {
     pub fn new<F>(getter: F) -> MonitorTask<V>
     where
-        F: Fn(&str) -> Pin<Box<dyn Future<Output = Result<V, Error>> + Send + '_>> + Send + Sync + 'static,
+        F: Fn(&str) -> Pin<Box<dyn Future<Output = anyhow::Result<V>> + Send + '_>>
+            + Send
+            + Sync
+            + 'static,
     {
         let getter = Arc::new(getter);
 
@@ -81,7 +86,7 @@ where
                     }
                     Ok(value)
                 }
-                Err(err) => Err(err),
+                Err(err) => Err(err.into()),
             }
         } else {
             Err(crate::Error::NotReady)
@@ -123,7 +128,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_task_basic() {
-        let mut task = MonitorTask::new(|_key| Box::pin(async { Ok("test_value".to_string()) })).key("test_key");
+        let mut task = MonitorTask::new(|_key| Box::pin(async { Ok("test_value".to_string()) }))
+            .key("test_key");
 
         // Initially, should be able to get value
         let value = task.get().await.unwrap();
@@ -135,7 +141,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_task_expiry() {
-        let mut task = MonitorTask::new(|_key| Box::pin(async { Ok("test_value".to_string()) })).key("test_key");
+        let mut task = MonitorTask::new(|_key| Box::pin(async { Ok("test_value".to_string()) }))
+            .key("test_key");
 
         // Initially should not be expired
         assert!(task.has_expired());
