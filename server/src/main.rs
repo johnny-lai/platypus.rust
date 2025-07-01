@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::Parser;
 use platypus::server::Server;
 use std::future::Future;
@@ -17,10 +17,13 @@ struct Args {
     target: String,
 }
 
-fn get_value(key: &str) -> Pin<Box<dyn Future<Output = Result<String, platypus::Error>> + Send + '_>> {
+fn get_value(key: &str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
     let key = key.to_string();
     Box::pin(async move {
-        Ok(format!("value_for_{} {:?}", key, Instant::now()))
+        match key.as_str() {
+            "ok" => Ok(format!("value_for_{} {:?}", key, Instant::now())),
+            _ => Err(anyhow!("invalid")),
+        }
     })
 }
 
