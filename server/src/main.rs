@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use platypus::server::Server;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Instant;
 
 #[derive(Parser, Debug)]
@@ -15,12 +17,19 @@ struct Args {
     target: String,
 }
 
+fn get_value(key: &str) -> Pin<Box<dyn Future<Output = Result<String, platypus::Error>> + Send + '_>> {
+    let key = key.to_string();
+    Box::pin(async move {
+        Ok(format!("value_for_{} {:?}", key, Instant::now()))
+    })
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
     Server::bind(&args.bind)
-        .getter(|key: &str| Ok(format!("value_for_{} {:?}", key, Instant::now())))
+        .getter(get_value)
         .target(&args.target)
         .version(env!("CARGO_PKG_VERSION"))
         .run()
