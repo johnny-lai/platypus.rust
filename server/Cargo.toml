@@ -10,3 +10,4 @@ futures.workspace = true
 platypus = { path = "../platypus" }
 tokio.workspace = true
 tokio-util.workspace = true
+tower.workspace = true

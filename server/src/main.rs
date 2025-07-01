@@ -1,8 +1,10 @@
 use anyhow::{Result, anyhow};
 use clap::Parser;
-use platypus::server::Server;
+use platypus::{Server, Service};
+use std::future::Future;
 use std::pin::Pin;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tower::ServiceBuilder;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -30,10 +32,14 @@ fn get_value(key: &str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> +
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    Server::bind(&args.bind)
+    let service = Service::new()
         .getter(get_value)
         .target(&args.target)
-        .version(env!("CARGO_PKG_VERSION"))
-        .run()
-        .await
+        .version(env!("CARGO_PKG_VERSION"));
+
+    let service = ServiceBuilder::new()
+        .timeout(Duration::from_secs(5))
+        .service(service);
+
+    Server::bind(&args.bind).serve(service).await
 }
