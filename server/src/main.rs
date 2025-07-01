@@ -5,6 +5,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -30,6 +31,13 @@ fn get_value(key: &str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> +
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let args = Args::parse();
 
     let service = Service::new()

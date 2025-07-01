@@ -8,6 +8,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::Notify;
 use tokio::time::Duration;
 use tower::Service as TowerService;
+use tracing::{error, warn};
 
 pub struct Server {
     listen_address: String,
@@ -59,7 +60,7 @@ impl Server {
         let notify_shutdown_on_ctrl_c = self.notify_shutdown.clone();
         tokio::spawn(async move {
             tokio::signal::ctrl_c().await.unwrap();
-            println!("Shutting down");
+            warn!("Shutting down");
             notify_shutdown_on_ctrl_c.notify_waiters();
         });
 
@@ -68,7 +69,7 @@ impl Server {
         tokio::spawn(async move {
             if let Ok(mut term_signal) = signal(SignalKind::terminate()) {
                 term_signal.recv().await.unwrap();
-                println!("Shutting down");
+                warn!("Shutting down");
                 notify_shutdown_on_term.notify_waiters();
             }
         });
@@ -116,7 +117,7 @@ impl Server {
                                                     writer.write_all(&response_data).await.unwrap();
                                                 }
                                                 Err(e) => {
-                                                    println!("Service call error: {}", e);
+                                                    error!(error = %e, "Service call error");
                                                     let error_response = protocol::Response::Error(e.to_string());
                                                     let response_data = error_response.serialize(&protocol::ProtocolType::Text);
                                                     writer.write_all(&response_data).await.unwrap();
@@ -125,7 +126,7 @@ impl Server {
                                         }
                                         Err(e) if matches!(e.downcast_ref::<ParseError>(), Some(ParseError::NoCommand)) => {}
                                         Err(e) => {
-                                            println!("Parse error: {}", e);
+                                            error!(error = %e, "Parse error");
                                             let error_response = protocol::Response::Error("Parse error".to_string());
                                             let response_data = error_response.serialize(&protocol::ProtocolType::Text);
                                             writer.write_all(&response_data).await.unwrap();

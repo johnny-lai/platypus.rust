@@ -9,6 +9,7 @@ use std::task::{Context, Poll};
 use tokio::sync::Mutex;
 use tokio::time::Duration;
 use tower;
+use tracing::info;
 
 pub trait AsyncGetter:
     Fn(&str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>>
@@ -139,7 +140,7 @@ where
         if let Some(getter) = &self.getter {
             match command {
                 Command::Get(keys) => {
-                    println!("GET command with keys: {:?}", keys);
+                    info!(keys = ?keys, "GET command");
                     let mut items = Vec::new();
                     for key in &keys {
                         match self
@@ -162,7 +163,7 @@ where
                     Ok(Response::Values(items))
                 }
                 Command::Gets(keys) => {
-                    println!("GETS command with keys: {:?}", keys);
+                    info!(keys = ?keys, "GETS command");
                     let mut items = Vec::new();
                     for key in &keys {
                         match self
@@ -185,7 +186,7 @@ where
                     Ok(Response::Values(items))
                 }
                 Command::Gat(exptime, keys) => {
-                    println!("GAT command with exptime {} and keys: {:?}", exptime, keys);
+                    info!(exptime = exptime, keys = ?keys, "GAT command");
                     let mut items = Vec::new();
                     for key in &keys {
                         let item = Item {
@@ -200,7 +201,7 @@ where
                     Ok(Response::Values(items))
                 }
                 Command::Gats(exptime, keys) => {
-                    println!("GATS command with exptime {} and keys: {:?}", exptime, keys);
+                    info!(exptime = exptime, keys = ?keys, "GATS command");
                     let mut items = Vec::new();
                     for key in &keys {
                         let item = Item {
@@ -215,7 +216,7 @@ where
                     Ok(Response::Values(items))
                 }
                 Command::MetaGet(key, flags) => {
-                    println!("META GET command with key: {} and flags: {:?}", key, flags);
+                    info!(key = key, flags = ?flags, "META GET command");
                     if let Ok(value) = self
                         .get_or_create_monitor_task(&key, getter, &target_writer)
                         .await
@@ -233,15 +234,15 @@ where
                     }
                 }
                 Command::MetaNoOp => {
-                    println!("META NOOP command");
+                    info!("META NOOP command");
                     Ok(Response::MetaNoOp)
                 }
                 Command::Version => {
-                    println!("VERSION command");
+                    info!("VERSION command");
                     Ok(Response::Version(self.version.clone()))
                 }
                 Command::Stats(arg) => {
-                    println!("STATS command with arg: {:?}", arg);
+                    info!(arg = ?arg, "STATS command");
                     let stats = vec![
                         ("version".to_string(), "0.1.0".to_string()),
                         ("curr_connections".to_string(), "1".to_string()),
@@ -252,11 +253,11 @@ where
                     Ok(Response::Stats(stats))
                 }
                 Command::Touch(key, exptime) => {
-                    println!("TOUCH command with key: {} exptime: {}", key, exptime);
+                    info!(key = key, exptime = exptime, "TOUCH command");
                     Ok(Response::Touched)
                 }
                 Command::Quit => {
-                    println!("QUIT command - closing connection");
+                    info!("QUIT command - closing connection");
                     Ok(Response::Error("Connection should close".to_string()))
                 }
             }
