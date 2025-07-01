@@ -106,6 +106,7 @@ impl Server {
                                 data = protocol::recv_command(&mut reader) => {
                                     match data {
                                         Ok(command_context) => {
+                                            let protocol = command_context.protocol.clone();
                                             let mut service = service.lock().await;
                                             match service.call(command_context).await {
                                                 Ok(response) => {
@@ -113,13 +114,13 @@ impl Server {
                                                     if matches!(response, protocol::Response::Error(ref msg) if msg == "Connection should close") {
                                                         break;
                                                     }
-                                                    let response_data = response.serialize(&protocol::ProtocolType::Text);
+                                                    let response_data = response.serialize(&protocol);
                                                     writer.write_all(&response_data).await.unwrap();
                                                 }
                                                 Err(e) => {
                                                     error!(error = %e, "Service call error");
                                                     let error_response = protocol::Response::Error(e.to_string());
-                                                    let response_data = error_response.serialize(&protocol::ProtocolType::Text);
+                                                    let response_data = error_response.serialize(&protocol);
                                                     writer.write_all(&response_data).await.unwrap();
                                                 }
                                             }
