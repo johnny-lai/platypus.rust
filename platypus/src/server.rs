@@ -115,13 +115,13 @@ impl Server {
                                                         break;
                                                     }
                                                     let response_data = response.serialize(&protocol);
-                                                    writer.write_all(&response_data).await.unwrap();
+                                                    _ = writer.write_all(&response_data).await;
                                                 }
                                                 Err(e) => {
                                                     error!(error = %e, "Service call error");
                                                     let error_response = protocol::Response::Error(e.to_string());
                                                     let response_data = error_response.serialize(&protocol);
-                                                    writer.write_all(&response_data).await.unwrap();
+                                                    _ = writer.write_all(&response_data).await;
                                                 }
                                             }
                                         }
@@ -130,7 +130,7 @@ impl Server {
                                             error!(error = %e, "Parse error");
                                             let error_response = protocol::Response::Error("Parse error".to_string());
                                             let response_data = error_response.serialize(&protocol::ProtocolType::Text);
-                                            writer.write_all(&response_data).await.unwrap();
+                                            _ = writer.write_all(&response_data).await;
                                         }
                                     }
                                 }
