@@ -11,6 +11,32 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{Mutex, Notify};
 use tokio::time::Duration;
 
+pub trait AsyncGetter:
+    Fn(&str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>>
+    + Clone
+    + Send
+    + Sync
+    + 'static
+{
+}
+
+impl<F> AsyncGetter for F where
+    F: Fn(&str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>>
+        + Clone
+        + Send
+        + Sync
+        + 'static
+{
+}
+
+pub fn async_getter<F, Fut>(f: F) -> impl AsyncGetter
+where
+    F: Fn(&str) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = anyhow::Result<String>> + Send + 'static,
+{
+    move |key: &str| Box::pin(f(key))
+}
+
 pub struct Server<F> {
     getter: Option<Arc<F>>,
     listen_address: String,
@@ -23,11 +49,7 @@ pub struct Server<F> {
 
 impl<F> Server<F>
 where
-    F: Fn(&str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    F: AsyncGetter,
 {
     /// Creates a new Server instance bound to the specified listen address.
     ///
@@ -234,13 +256,9 @@ where
 
         // Create new MonitorTask for this key
         let getter_clone = getter.clone();
-        let mut monitor_task = MonitorTask::new(
-            move |key: &str| -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
-                getter_clone(key)
-            },
-        )
-        .interval(Duration::from_secs(5))
-        .key(key);
+        let mut monitor_task = MonitorTask::new(move |key: &str| getter_clone(key))
+            .interval(Duration::from_secs(5))
+            .key(key);
 
         if let Some(target_writer) = target_writer {
             monitor_task = monitor_task.target(target_writer.clone());
@@ -396,10 +414,7 @@ where
 
 impl<F> Clone for Server<F>
 where
-    F: Fn(&str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>>
-        + Send
-        + Sync
-        + 'static,
+    F: AsyncGetter,
 {
     fn clone(&self) -> Self {
         Self {

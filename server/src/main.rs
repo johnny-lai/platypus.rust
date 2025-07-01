@@ -1,7 +1,6 @@
 use anyhow::{Result, anyhow};
 use clap::Parser;
 use platypus::server::Server;
-use std::future::Future;
 use std::pin::Pin;
 use std::time::Instant;
 
