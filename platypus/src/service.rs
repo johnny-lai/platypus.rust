@@ -12,7 +12,7 @@ use tower;
 use tracing::info;
 
 pub trait AsyncGetter:
-    Fn(&str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>>
+    Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>>
     + Clone
     + Send
     + Sync
@@ -21,7 +21,7 @@ pub trait AsyncGetter:
 }
 
 impl<F> AsyncGetter for F where
-    F: Fn(&str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>>
+    F: Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>>
         + Clone
         + Send
         + Sync
@@ -96,7 +96,7 @@ where
         key: &str,
         getter: &Arc<F>,
         target_writer: &Option<Arc<Writer<String>>>,
-    ) -> Result<String, Error> {
+    ) -> Option<String> {
         let mut tasks = self.monitor_tasks.lock().await;
 
         // Check if we already have a MonitorTask for this key
@@ -105,7 +105,7 @@ where
 
             // Return the last cached value
             match task.last_result() {
-                Some(ret) => return Ok(ret),
+                Some(ret) => return Some(ret),
                 _ => {}
             }
         }
@@ -147,7 +147,7 @@ where
                             .get_or_create_monitor_task(key, getter, &target_writer)
                             .await
                         {
-                            Ok(value) => {
+                            Some(value) => {
                                 let item = Item {
                                     key: key.clone(),
                                     flags: 0,
@@ -157,7 +157,7 @@ where
                                 };
                                 items.push(item);
                             }
-                            Err(e) => return Err(e.into()),
+                            None => {}
                         }
                     }
                     Ok(Response::Values(items))
@@ -170,7 +170,7 @@ where
                             .get_or_create_monitor_task(key, getter, &target_writer)
                             .await
                         {
-                            Ok(value) => {
+                            Some(value) => {
                                 let item = Item {
                                     key: key.clone(),
                                     flags: 0,
@@ -180,7 +180,7 @@ where
                                 };
                                 items.push(item);
                             }
-                            Err(_err) => {}
+                            None => {}
                         }
                     }
                     Ok(Response::Values(items))
@@ -217,7 +217,7 @@ where
                 }
                 Command::MetaGet(key, flags) => {
                     info!(key = key, flags = ?flags, "META GET command");
-                    if let Ok(value) = self
+                    if let Some(value) = self
                         .get_or_create_monitor_task(&key, getter, &target_writer)
                         .await
                     {

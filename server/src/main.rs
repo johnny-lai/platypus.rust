@@ -19,12 +19,12 @@ struct Args {
     target: String,
 }
 
-fn get_value(key: &str) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
+fn get_value(key: &str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>> {
     let key = key.to_string();
     Box::pin(async move {
         match key.as_str() {
-            "ok" => Ok(format!("value_for_{} {:?}", key, Instant::now())),
-            _ => Err(anyhow!("invalid")),
+            "ok" => Some(format!("value_for_{} {:?}", key, Instant::now())),
+            _ => None,
         }
     })
 }
