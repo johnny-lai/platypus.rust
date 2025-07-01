@@ -2,6 +2,8 @@ use crate::Error;
 use crate::writer::Writer;
 use memcache::{Stream, ToMemcacheValue};
 use std::fmt::Display;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 
@@ -27,7 +29,7 @@ pub struct MonitorTask<V> {
     last_result: Option<V>,
 
     // Result
-    getter: Arc<dyn Fn(&str) -> Result<V, Error> + Send + Sync>,
+    getter: Arc<dyn Fn(&str) -> Pin<Box<dyn Future<Output = Result<V, Error>> + Send + '_>> + Send + Sync>,
 
     // The target where updated values will be written to
     target: Option<Arc<Writer<V>>>,
@@ -39,7 +41,7 @@ where
 {
     pub fn new<F>(getter: F) -> MonitorTask<V>
     where
-        F: Fn(&str) -> Result<V, Error> + Send + Sync + 'static,
+        F: Fn(&str) -> Pin<Box<dyn Future<Output = Result<V, Error>> + Send + '_>> + Send + Sync + 'static,
     {
         let getter = Arc::new(getter);
 
@@ -70,7 +72,7 @@ where
 
     pub async fn get(&mut self) -> Result<V, Error> {
         if let Some(ref key) = self.key {
-            match (self.getter)(key) {
+            match (self.getter)(key).await {
                 Ok(value) => {
                     self.last_result = Some(value.clone());
                     if let Some(target) = &self.target {
@@ -121,7 +123,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_task_basic() {
-        let mut task = MonitorTask::new(|_key| Ok("test_value".to_string())).key("test_key");
+        let mut task = MonitorTask::new(|_key| Box::pin(async { Ok("test_value".to_string()) })).key("test_key");
 
         // Initially, should be able to get value
         let value = task.get().await.unwrap();
@@ -133,7 +135,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_task_expiry() {
-        let mut task = MonitorTask::new(|_key| Ok("test_value".to_string())).key("test_key");
+        let mut task = MonitorTask::new(|_key| Box::pin(async { Ok("test_value".to_string()) })).key("test_key");
 
         // Initially should not be expired
         assert!(task.has_expired());
@@ -149,7 +151,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_task_no_key() {
-        let mut task = MonitorTask::new(|_key| Ok("test_value".to_string()));
+        let mut task = MonitorTask::new(|_key| Box::pin(async { Ok("test_value".to_string()) }));
 
         // Should return NotReady error when no key is set
         let result = task.get().await;

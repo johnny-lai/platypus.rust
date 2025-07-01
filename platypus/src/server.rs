@@ -2,6 +2,8 @@ use crate::protocol::{self, Command, Item, ParseError, Response};
 use crate::{Error, MonitorTask, Writer};
 use anyhow::Result;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
@@ -21,7 +23,7 @@ pub struct Server<F> {
 
 impl<F> Server<F>
 where
-    F: Fn(&str) -> Result<String, Error> + Clone + Send + Sync + 'static,
+    F: Fn(&str) -> Pin<Box<dyn Future<Output = Result<String, Error>> + Send + '_>> + Clone + Send + Sync + 'static,
 {
     /// Creates a new Server instance bound to the specified listen address.
     ///
@@ -229,7 +231,9 @@ where
         // Create new MonitorTask for this key
         let getter_clone = getter.clone();
         let mut monitor_task =
-            MonitorTask::new(move |key: &str| -> Result<String, Error> { getter_clone(key) })
+            MonitorTask::new(move |key: &str| -> Pin<Box<dyn Future<Output = Result<String, Error>> + Send + '_>> { 
+                getter_clone(key) 
+            })
                 .interval(Duration::from_secs(5))
                 .key(key);
 
@@ -387,7 +391,7 @@ where
 
 impl<F> Clone for Server<F>
 where
-    F: Fn(&str) -> Result<String, Error> + Send + Sync + 'static,
+    F: Fn(&str) -> Pin<Box<dyn Future<Output = Result<String, Error>> + Send + '_>> + Send + Sync + 'static,
 {
     fn clone(&self) -> Self {
         Self {
