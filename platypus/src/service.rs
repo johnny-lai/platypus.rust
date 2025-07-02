@@ -229,3 +229,14 @@ where
         &self.monitor_tasks
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_monitor_tasks_exists() {
+        // Just test that MonitorTasks can be created
+        let _monitor_tasks: MonitorTasks<String> = MonitorTasks::new();
+    }
+}

@@ -2,7 +2,6 @@ use crate::monitor::MonitorTasks;
 use crate::protocol::{self, ParseError};
 use anyhow::Result;
 use std::error::Error;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, UnixListener};
@@ -239,6 +238,219 @@ impl Clone for Server {
             socket_config: self.socket_config.clone(),
             notify_shutdown: self.notify_shutdown.clone(),
             monitor_tasks: self.monitor_tasks.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{Command, CommandContext, ProtocolType, Response};
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    #[derive(Clone)]
+    struct MockService {
+        should_error: bool,
+    }
+
+    impl TowerService<CommandContext> for MockService {
+        type Response = Response;
+        type Error = Box<dyn Error + Send + Sync>;
+        type Future =
+            Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: CommandContext) -> Self::Future {
+            let should_error = self.should_error;
+            Box::pin(async move {
+                if should_error {
+                    return Err("Mock service error".into());
+                }
+                match req.command {
+                    Command::Version => Ok(Response::Version("1.0.0".to_string())),
+                    Command::Quit => Ok(Response::Error("Connection should close".to_string())),
+                    Command::Get(_keys) => Ok(Response::Values(vec![])),
+                    _ => Ok(Response::Error("Unsupported command".to_string())),
+                }
+            })
+        }
+    }
+
+    #[test]
+    fn test_server_bind() {
+        let server = Server::bind("127.0.0.1:11211");
+        match server.socket_config {
+            SocketType::Tcp(addr) => assert_eq!(addr, "127.0.0.1:11211"),
+            _ => panic!("Expected TCP socket type"),
+        }
+        assert!(server.monitor_tasks.is_none());
+    }
+
+    #[test]
+    fn test_server_bind_unix() {
+        let server = Server::bind_unix("/tmp/test.sock");
+        match server.socket_config {
+            SocketType::Unix(path) => assert_eq!(path, "/tmp/test.sock"),
+            _ => panic!("Expected Unix socket type"),
+        }
+        assert!(server.monitor_tasks.is_none());
+    }
+
+    #[test]
+    fn test_server_with_monitor_tasks() {
+        let mut server = Server::bind("127.0.0.1:11211");
+        let monitor_tasks = MonitorTasks::new();
+
+        server.with_monitor_tasks(monitor_tasks);
+        assert!(server.monitor_tasks.is_some());
+    }
+
+    #[test]
+    fn test_server_clone() {
+        let server = Server::bind("127.0.0.1:11211");
+        let cloned_server = server.clone();
+
+        match (&server.socket_config, &cloned_server.socket_config) {
+            (SocketType::Tcp(addr1), SocketType::Tcp(addr2)) => {
+                assert_eq!(addr1, addr2);
+            }
+            _ => panic!("Socket types don't match"),
+        }
+    }
+
+    #[test]
+    fn test_socket_type_clone() {
+        let tcp_socket = SocketType::Tcp("127.0.0.1:11211".to_string());
+        let cloned_tcp = tcp_socket.clone();
+        match (tcp_socket, cloned_tcp) {
+            (SocketType::Tcp(addr1), SocketType::Tcp(addr2)) => {
+                assert_eq!(addr1, addr2);
+            }
+            _ => panic!("TCP socket types don't match"),
+        }
+
+        let unix_socket = SocketType::Unix("/tmp/test.sock".to_string());
+        let cloned_unix = unix_socket.clone();
+        match (unix_socket, cloned_unix) {
+            (SocketType::Unix(path1), SocketType::Unix(path2)) => {
+                assert_eq!(path1, path2);
+            }
+            _ => panic!("Unix socket types don't match"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_server_bind_invalid_address() {
+        let server = Server::bind("invalid_address");
+        let service = MockService {
+            should_error: false,
+        };
+
+        let result = server.serve(service).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_server_bind_unix_invalid_path() {
+        let server = Server::bind_unix("/invalid/path/that/does/not/exist/test.sock");
+        let service = MockService {
+            should_error: false,
+        };
+
+        let result = server.serve(service).await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_server_configuration_chaining() {
+        let mut server = Server::bind("127.0.0.1:11211");
+        let monitor_tasks = MonitorTasks::new();
+
+        server.with_monitor_tasks(monitor_tasks);
+
+        match server.socket_config {
+            SocketType::Tcp(addr) => assert_eq!(addr, "127.0.0.1:11211"),
+            _ => panic!("Expected TCP socket type"),
+        }
+        assert!(server.monitor_tasks.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_mock_service_version_command() {
+        let mut service = MockService {
+            should_error: false,
+        };
+        let command_context = CommandContext {
+            command: Command::Version,
+            protocol: ProtocolType::Text,
+        };
+
+        let result = service.call(command_context).await.unwrap();
+        match result {
+            Response::Version(version) => assert_eq!(version, "1.0.0"),
+            _ => panic!("Expected Version response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mock_service_quit_command() {
+        let mut service = MockService {
+            should_error: false,
+        };
+        let command_context = CommandContext {
+            command: Command::Quit,
+            protocol: ProtocolType::Text,
+        };
+
+        let result = service.call(command_context).await.unwrap();
+        match result {
+            Response::Error(msg) => assert_eq!(msg, "Connection should close"),
+            _ => panic!("Expected Error response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mock_service_error() {
+        let mut service = MockService { should_error: true };
+        let command_context = CommandContext {
+            command: Command::Version,
+            protocol: ProtocolType::Text,
+        };
+
+        let result = service.call(command_context).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Mock service error");
+    }
+
+    #[tokio::test]
+    async fn test_mock_service_poll_ready() {
+        let mut service = MockService {
+            should_error: false,
+        };
+        let mut context = Context::from_waker(futures::task::noop_waker_ref());
+
+        let result = service.poll_ready(&mut context);
+        assert!(matches!(result, Poll::Ready(Ok(()))));
+    }
+
+    #[tokio::test]
+    async fn test_mock_service_get_command() {
+        let mut service = MockService {
+            should_error: false,
+        };
+        let command_context = CommandContext {
+            command: Command::Get(vec!["test_key".to_string()]),
+            protocol: ProtocolType::Text,
+        };
+
+        let result = service.call(command_context).await.unwrap();
+        match result {
+            Response::Values(items) => assert_eq!(items.len(), 0),
+            _ => panic!("Expected Values response"),
         }
     }
 }

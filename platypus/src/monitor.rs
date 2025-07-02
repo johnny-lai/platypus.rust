@@ -220,4 +220,119 @@ mod tests {
         let result = task.get().await;
         assert!(matches!(result, None));
     }
+
+    #[tokio::test]
+    async fn test_monitor_task_target() {
+        let task = MonitorTask::new(|_key| Box::pin(async { Some("test_value".to_string()) }));
+        let writer = Arc::new(Writer::<String>::new("127.0.0.1:11211"));
+
+        let task_with_target = task.target(writer.clone());
+        assert!(task_with_target.target.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_monitor_task_interval() {
+        let task = MonitorTask::new(|_key| Box::pin(async { Some("test_value".to_string()) }));
+        let custom_interval = Duration::from_secs(10);
+
+        let task_with_interval = task.interval(custom_interval);
+        assert_eq!(task_with_interval.interval, custom_interval);
+    }
+
+    #[tokio::test]
+    async fn test_monitor_task_key_method() {
+        let task = MonitorTask::new(|_key| Box::pin(async { Some("test_value".to_string()) }));
+
+        let task_with_key = task.key("custom_key");
+        assert_eq!(task_with_key.key, Some("custom_key".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_monitor_task_chaining() {
+        let writer = Arc::new(Writer::<String>::new("127.0.0.1:11211"));
+        let custom_interval = Duration::from_secs(15);
+
+        let task = MonitorTask::new(|_key| Box::pin(async { Some("test_value".to_string()) }))
+            .target(writer.clone())
+            .interval(custom_interval)
+            .key("chained_key");
+
+        assert!(task.target.is_some());
+        assert_eq!(task.interval, custom_interval);
+        assert_eq!(task.key, Some("chained_key".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_monitor_task_tick_expired() {
+        let mut task = MonitorTask::new(|_key| Box::pin(async { Some("test_value".to_string()) }))
+            .key("test_key");
+
+        // Task should be expired initially (until not touched)
+        assert!(task.has_expired());
+
+        // Tick should return false for expired task
+        let result = task.tick().await;
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_monitor_task_tick_not_expired() {
+        let mut task = MonitorTask::new(|_key| Box::pin(async { Some("test_value".to_string()) }))
+            .key("test_key");
+
+        // Touch to make it non-expired
+        task.touch();
+        assert!(!task.has_expired());
+
+        // Tick should return true for non-expired task
+        let result = task.tick().await;
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_monitor_task_with_writer_target() {
+        let writer = Arc::new(Writer::<String>::new("127.0.0.1:11211"));
+        let mut task = MonitorTask::new(|_key| Box::pin(async { Some("test_value".to_string()) }))
+            .target(writer)
+            .key("test_key");
+
+        task.touch();
+        let result = task.get().await;
+        assert_eq!(result, Some("test_value".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_monitor_tasks_new() {
+        let tasks: MonitorTasks<String> = MonitorTasks::new();
+        // Test that tick doesn't panic on empty tasks
+        tasks.tick().await;
+    }
+
+    #[tokio::test]
+    async fn test_monitor_task_get_updates_timestamp() {
+        let mut task = MonitorTask::new(|_key| Box::pin(async { Some("test_value".to_string()) }))
+            .key("test_key");
+
+        let initial_updated_at = task.updated_at;
+
+        // Small delay to ensure timestamp difference
+        sleep(Duration::from_millis(1)).await;
+
+        task.touch();
+        let _ = task.get().await;
+
+        // updated_at should be different after get() call
+        assert_ne!(task.updated_at, initial_updated_at);
+    }
+
+    #[tokio::test]
+    async fn test_monitor_task_get_none_value() {
+        let mut task = MonitorTask::new(|_key| Box::pin(async { None::<String> })).key("test_key");
+
+        task.touch();
+        let result = task.get().await;
+
+        assert_eq!(result, None);
+        assert_eq!(task.last_result(), None);
+    }
 }
