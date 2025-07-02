@@ -1,9 +1,11 @@
 use crate::writer::Writer;
 use memcache::{Stream, ToMemcacheValue};
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
 
 pub struct MonitorTask<V> {
@@ -73,6 +75,7 @@ where
         if let Some(ref key) = self.key {
             match (self.getter)(key).await {
                 Some(value) => {
+                    self.updated_at = Instant::now();
                     self.last_result = Some(value.clone());
                     if let Some(target) = &self.target {
                         let value = value.clone();
@@ -112,6 +115,65 @@ where
     pub fn key(mut self, key: &str) -> Self {
         self.key = Some(key.into());
         self
+    }
+}
+
+#[derive(Clone)]
+pub struct MonitorTasks<V> {
+    tasks: Arc<Mutex<HashMap<String, MonitorTask<V>>>>,
+}
+
+impl<V> MonitorTasks<V>
+where
+    V: Display + ToMemcacheValue<Stream> + Send + Sync + Clone + 'static,
+{
+    pub fn new() -> Self {
+        Self {
+            tasks: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub async fn get_or_create_task<F>(
+        &self,
+        key: &str,
+        getter: &Arc<F>,
+        target_writer: &Option<Arc<Writer<V>>>,
+    ) -> Option<V>
+    where
+        F: Fn(&str) -> Pin<Box<dyn Future<Output = Option<V>> + Send + '_>> + Send + Sync + 'static,
+    {
+        let mut tasks = self.tasks.lock().await;
+
+        if let Some(ref mut task) = tasks.get_mut(key) {
+            task.touch();
+            match task.last_result() {
+                Some(ret) => return Some(ret),
+                _ => {}
+            }
+        }
+
+        let getter_clone = getter.clone();
+        let mut monitor_task = MonitorTask::new(move |key: &str| getter_clone(key))
+            .interval(Duration::from_secs(5))
+            .key(key);
+
+        if let Some(target_writer) = target_writer {
+            monitor_task = monitor_task.target(target_writer.clone());
+        }
+
+        monitor_task.touch();
+        let value = monitor_task.get().await;
+        tasks.insert(key.to_string(), monitor_task);
+        value
+    }
+
+    pub async fn tick(&self) {
+        let mut tasks = self.tasks.lock().await;
+        for task in tasks.values_mut() {
+            if !task.has_expired() {
+                _ = task.tick().await;
+            }
+        }
     }
 }
 

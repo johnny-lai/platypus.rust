@@ -1,6 +1,8 @@
+use crate::monitor::MonitorTasks;
 use crate::protocol::{self, ParseError};
 use anyhow::Result;
 use std::error::Error;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, UnixListener};
@@ -10,6 +12,7 @@ use tokio::time::Duration;
 use tower::Service as TowerService;
 use tracing::{error, info, warn};
 
+#[derive(Clone)]
 pub enum SocketType {
     Tcp(String),
     Unix(String),
@@ -18,10 +21,11 @@ pub enum SocketType {
 pub struct Server {
     socket_config: SocketType,
     notify_shutdown: Arc<Notify>,
+    monitor_tasks: Option<MonitorTasks<String>>,
 }
 
 impl Server {
-    /// Creates a new Server instance bound to the specified TCP address.
+    /// Creates a new Server instance bound to the specified listen address.
     ///
     /// # Arguments
     /// * `listen_address` - The TCP address to bind the server to (e.g., "127.0.0.1:11212")
@@ -32,6 +36,7 @@ impl Server {
         Self {
             socket_config: SocketType::Tcp(listen_address.to_owned()),
             notify_shutdown: Arc::new(Notify::new()),
+            monitor_tasks: None,
         }
     }
 
@@ -46,12 +51,18 @@ impl Server {
         Self {
             socket_config: SocketType::Unix(socket_path.to_owned()),
             notify_shutdown: Arc::new(Notify::new()),
+            monitor_tasks: None,
         }
+    }
+
+    pub fn with_monitor_tasks(&mut self, monitor_tasks: MonitorTasks<String>) -> &mut Self {
+        self.monitor_tasks = Some(monitor_tasks);
+        self
     }
 
     /// Starts the memcached server and handles incoming connections.
     ///
-    /// This method starts the server (TCP or Unix socket), sets up signal handling for graceful shutdown,
+    /// This method starts the TCP server, sets up signal handling for graceful shutdown,
     /// and processes memcached protocol commands from clients using the provided Service.
     /// It will run until a shutdown signal (SIGINT or SIGTERM) is received.
     ///
@@ -60,7 +71,7 @@ impl Server {
     ///
     /// # Errors
     /// Returns an error if:
-    /// - The listener cannot bind to the specified address or socket path
+    /// - The TCP listener cannot bind to the specified address
     /// - Network I/O errors occur during operation
     pub async fn serve<S>(self, service: S) -> Result<()>
     where
@@ -112,6 +123,12 @@ impl Server {
             tokio::select! {
                 _ = self.notify_shutdown.notified() => {
                     break;
+                }
+
+                _ = monitor_interval.tick() => {
+                    if let Some(ref monitor_tasks) = self.monitor_tasks {
+                        monitor_tasks.tick().await;
+                    }
                 }
 
                 // Handle TCP connections
@@ -199,6 +216,7 @@ impl Server {
                                     _ = writer.write_all(&response_data).await;
                                 }
                             }
+                            line.clear();
                         }
                         Err(e) if matches!(e.downcast_ref::<ParseError>(), Some(ParseError::NoCommand)) => {}
                         Err(e) => {
@@ -220,15 +238,7 @@ impl Clone for Server {
         Self {
             socket_config: self.socket_config.clone(),
             notify_shutdown: self.notify_shutdown.clone(),
-        }
-    }
-}
-
-impl Clone for SocketType {
-    fn clone(&self) -> Self {
-        match self {
-            SocketType::Tcp(addr) => SocketType::Tcp(addr.clone()),
-            SocketType::Unix(path) => SocketType::Unix(path.clone()),
+            monitor_tasks: self.monitor_tasks.clone(),
         }
     }
 }
