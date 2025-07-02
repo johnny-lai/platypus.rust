@@ -1,33 +1,13 @@
+use crate::AsyncGetter;
 use crate::protocol::{self, Command, Item, Response};
-use crate::{Error, MonitorTask, Writer};
+use crate::{MonitorTasks, Writer};
 use anyhow::Result;
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio::sync::Mutex;
-use tokio::time::Duration;
 use tower;
 use tracing::info;
-
-pub trait AsyncGetter:
-    Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>>
-    + Clone
-    + Send
-    + Sync
-    + 'static
-{
-}
-
-impl<F> AsyncGetter for F where
-    F: Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>>
-        + Clone
-        + Send
-        + Sync
-        + 'static
-{
-}
 
 #[derive(Clone)]
 pub struct Service<F>
@@ -37,7 +17,7 @@ where
     getter: Option<Arc<F>>,
     target_address: Option<String>,
     version: String,
-    monitor_tasks: Arc<Mutex<HashMap<String, MonitorTask<String>>>>,
+    monitor_tasks: MonitorTasks<String>,
 }
 
 impl<F> tower::Service<protocol::CommandContext> for Service<F>
@@ -68,11 +48,15 @@ where
     F: AsyncGetter,
 {
     pub fn new() -> Self {
+        Self::with_monitor_tasks(MonitorTasks::new())
+    }
+
+    pub fn with_monitor_tasks(monitor_tasks: MonitorTasks<String>) -> Self {
         Self {
             getter: None,
             target_address: None,
             version: "0.0.0".into(),
-            monitor_tasks: Arc::new(Mutex::new(HashMap::new())),
+            monitor_tasks,
         }
     }
 
@@ -97,38 +81,9 @@ where
         getter: &Arc<F>,
         target_writer: &Option<Arc<Writer<String>>>,
     ) -> Option<String> {
-        let mut tasks = self.monitor_tasks.lock().await;
-
-        // Check if we already have a MonitorTask for this key
-        if let Some(ref mut task) = tasks.get_mut(key) {
-            task.touch();
-
-            // Return the last cached value
-            match task.last_result() {
-                Some(ret) => return Some(ret),
-                _ => {}
-            }
-        }
-
-        // Create new MonitorTask for this key
-        let getter_clone = getter.clone();
-        let mut monitor_task = MonitorTask::new(move |key: &str| getter_clone(key))
-            .interval(Duration::from_secs(5))
-            .key(key);
-
-        if let Some(target_writer) = target_writer {
-            monitor_task = monitor_task.target(target_writer.clone());
-        }
-
-        // Touch
-        monitor_task.touch();
-
-        // Get the current value or trigger a fresh computation
-        let value = monitor_task.get().await;
-
-        // Keep monitor_task
-        tasks.insert(key.to_string(), monitor_task);
-        value
+        self.monitor_tasks
+            .get_or_create_task(key, getter, target_writer)
+            .await
     }
 
     async fn handle_command(&self, command: Command) -> anyhow::Result<Response> {
@@ -264,5 +219,24 @@ where
         } else {
             Err(anyhow::anyhow!("No getter function configured"))
         }
+    }
+
+    pub async fn tick(&self) {
+        self.monitor_tasks.tick().await;
+    }
+
+    pub fn monitor_tasks(&self) -> &MonitorTasks<String> {
+        &self.monitor_tasks
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_monitor_tasks_exists() {
+        // Just test that MonitorTasks can be created
+        let _monitor_tasks: MonitorTasks<String> = MonitorTasks::new();
     }
 }

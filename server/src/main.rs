@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use clap::Parser;
-use platypus::{Server, Service};
+use platypus::{MonitorTasks, Server, Service};
 use std::future::Future;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
@@ -10,9 +10,13 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Address to bind to
-    #[arg(short, long, default_value = "127.0.0.1:11212")]
-    bind: String,
+    /// Address to bind to (TCP address like "127.0.0.1:11212")
+    #[arg(short, long, conflicts_with = "unix_socket")]
+    bind: Option<String>,
+
+    /// Unix socket path to bind to (e.g., "/tmp/platypus.sock")
+    #[arg(short, long, conflicts_with = "bind")]
+    unix_socket: Option<String>,
 
     /// Target memcached server
     #[arg(short, long, default_value = "memcache://127.0.0.1:11213")]
@@ -40,14 +44,25 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let service = Service::new()
+    let monitor_tasks = MonitorTasks::new();
+    let monitor_tasks_for_tick = monitor_tasks.clone();
+
+    let handler = Service::with_monitor_tasks(monitor_tasks)
         .getter(get_value)
         .target(&args.target)
         .version(env!("CARGO_PKG_VERSION"));
 
     let service = ServiceBuilder::new()
         .timeout(Duration::from_secs(5))
-        .service(service);
+        .service(handler);
 
-    Server::bind(&args.bind).serve(service).await
+    let mut server = match (args.bind, args.unix_socket) {
+        (Some(bind_addr), None) => Server::bind(&bind_addr),
+        (None, Some(unix_path)) => Server::bind_unix(&unix_path),
+        (None, None) => Server::bind("127.0.0.1:11212"), // Default TCP binding
+        (Some(_), Some(_)) => return Err(anyhow!("Cannot specify both --bind and --unix-socket")),
+    };
+
+    server.with_monitor_tasks(monitor_tasks_for_tick);
+    server.serve(service).await
 }
