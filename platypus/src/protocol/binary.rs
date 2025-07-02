@@ -276,10 +276,26 @@ pub fn serialize_binary_response(response: &Response, opaque: u32) -> Result<Vec
             // For multiple values, we need to send multiple response packets
             // This is a simplified implementation - in practice, binary protocol
             // handles this differently with quiet commands
-            for item in items {
-                let item_response = Response::Value(item.clone());
-                let item_data = serialize_binary_response(&item_response, opaque)?;
-                result.extend_from_slice(&item_data);
+            if items.len() > 0 {
+                for item in items {
+                    let item_response = Response::Value(item.clone());
+                    let item_data = serialize_binary_response(&item_response, opaque)?;
+                    result.extend_from_slice(&item_data);
+                }
+            } else {
+                let header = BinaryHeader {
+                    magic: MAGIC_RESPONSE,
+                    opcode: OPCODE_GET,
+                    key_length: 0, // Standard get doesn't return key
+                    extras_length: 4,
+                    data_type: 0,
+                    status_or_reserved: STATUS_KEY_NOT_FOUND,
+                    total_body_length: 0,
+                    opaque,
+                    cas: 0,
+                };
+
+                header.write_to(&mut result)?;
             }
         }
         Response::End => {
@@ -431,6 +447,19 @@ mod tests {
 
         assert_eq!(data.len(), 24); // Just header
         assert_eq!(data[0], MAGIC_RESPONSE);
+        // Check status field (bytes 6-7)
+        let status = u16::from_be_bytes([data[6], data[7]]);
+        assert_eq!(status, STATUS_KEY_NOT_FOUND);
+    }
+
+    #[test]
+    fn test_serialize_empty_values_response() {
+        let response = Response::Values(vec![]);
+        let data = serialize_binary_response(&response, 0).unwrap();
+
+        assert_eq!(data.len(), 24); // Just header
+        assert_eq!(data[0], MAGIC_RESPONSE);
+        assert_eq!(data[1], OPCODE_GET);
         // Check status field (bytes 6-7)
         let status = u16::from_be_bytes([data[6], data[7]]);
         assert_eq!(status, STATUS_KEY_NOT_FOUND);
