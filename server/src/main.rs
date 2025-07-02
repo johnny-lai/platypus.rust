@@ -10,9 +10,13 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Address to bind to
-    #[arg(short, long, default_value = "127.0.0.1:11212")]
-    bind: String,
+    /// Address to bind to (TCP address like "127.0.0.1:11212")
+    #[arg(short, long, conflicts_with = "unix_socket")]
+    bind: Option<String>,
+
+    /// Unix socket path to bind to (e.g., "/tmp/platypus.sock")
+    #[arg(short, long, conflicts_with = "bind")]
+    unix_socket: Option<String>,
 
     /// Target memcached server
     #[arg(short, long, default_value = "memcache://127.0.0.1:11213")]
@@ -49,5 +53,12 @@ async fn main() -> Result<()> {
         .timeout(Duration::from_secs(5))
         .service(service);
 
-    Server::bind(&args.bind).serve(service).await
+    let server = match (args.bind, args.unix_socket) {
+        (Some(bind_addr), None) => Server::bind(&bind_addr),
+        (None, Some(unix_path)) => Server::bind_unix(&unix_path),
+        (None, None) => Server::bind("127.0.0.1:11212"), // Default TCP binding
+        (Some(_), Some(_)) => return Err(anyhow!("Cannot specify both --bind and --unix-socket")),
+    };
+
+    server.serve(service).await
 }

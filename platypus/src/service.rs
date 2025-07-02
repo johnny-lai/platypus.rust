@@ -1,5 +1,5 @@
 use crate::protocol::{self, Command, Item, Response};
-use crate::{Error, MonitorTask, Writer};
+use crate::{MonitorTask, Writer};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::future::Future;

@@ -1,4 +1,3 @@
-use crate::Error;
 use crate::writer::Writer;
 use memcache::{Stream, ToMemcacheValue};
 use std::fmt::Display;
