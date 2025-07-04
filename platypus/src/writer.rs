@@ -2,6 +2,7 @@ use memcache::{MemcacheError, Stream, ToMemcacheValue};
 use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
 use std::thread::JoinHandle;
 use tokio::time::Duration;
+use tracing::info;
 
 #[derive(Clone)]
 pub struct WriteJob<V> {
@@ -21,6 +22,8 @@ where
     V: ToMemcacheValue<Stream> + Send + Sync + 'static,
 {
     pub fn new(target_address: &str) -> Self {
+        info!(target_address = ?target_address, "New Writer");
+
         let (tx, rx) = channel::<WriteJob<V>>();
         let (shutdown_tx, shutdown_rx) = channel::<()>();
 

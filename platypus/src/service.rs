@@ -15,9 +15,9 @@ where
     F: AsyncGetter,
 {
     getter: Option<Arc<F>>,
-    target_address: Option<String>,
-    version: String,
     monitor_tasks: MonitorTasks<String>,
+    target_writer: Option<Arc<Writer<String>>>,
+    version: String,
 }
 
 impl<F> tower::Service<protocol::CommandContext> for Service<F>
@@ -54,9 +54,9 @@ where
     pub fn with_monitor_tasks(monitor_tasks: MonitorTasks<String>) -> Self {
         Self {
             getter: None,
-            target_address: None,
-            version: "0.0.0".into(),
             monitor_tasks,
+            target_writer: None,
+            version: "0.0.0".into(),
         }
     }
 
@@ -66,7 +66,7 @@ where
     }
 
     pub fn target(mut self, target_address: &str) -> Self {
-        self.target_address = Some(target_address.to_owned());
+        self.target_writer = Some(Arc::new(Writer::<String>::new(target_address)));
         self
     }
 
@@ -75,33 +75,20 @@ where
         self
     }
 
-    async fn get_or_create_monitor_task(
-        &self,
-        key: &str,
-        getter: &Arc<F>,
-        target_writer: &Option<Arc<Writer<String>>>,
-    ) -> Option<String> {
+    async fn get_or_create_monitor_task(&self, key: &str, getter: &Arc<F>) -> Option<String> {
         self.monitor_tasks
-            .get_or_create_task(key, getter, target_writer)
+            .get_or_create_task(key, getter, &self.target_writer)
             .await
     }
 
     async fn handle_command(&self, command: Command) -> anyhow::Result<Response> {
-        let target_writer = self
-            .target_address
-            .as_ref()
-            .map(|addr| Arc::new(Writer::<String>::new(addr.as_ref())));
-
         if let Some(getter) = &self.getter {
             match command {
                 Command::Get(keys) => {
                     info!(keys = ?keys, "GET command");
                     let mut items = Vec::new();
                     for key in &keys {
-                        match self
-                            .get_or_create_monitor_task(key, getter, &target_writer)
-                            .await
-                        {
+                        match self.get_or_create_monitor_task(key, getter).await {
                             Some(value) => {
                                 let item = Item {
                                     key: key.clone(),
@@ -121,10 +108,7 @@ where
                     info!(keys = ?keys, "GETS command");
                     let mut items = Vec::new();
                     for key in &keys {
-                        match self
-                            .get_or_create_monitor_task(key, getter, &target_writer)
-                            .await
-                        {
+                        match self.get_or_create_monitor_task(key, getter).await {
                             Some(value) => {
                                 let item = Item {
                                     key: key.clone(),
@@ -172,10 +156,7 @@ where
                 }
                 Command::MetaGet(key, flags) => {
                     info!(key = key, flags = ?flags, "META GET command");
-                    if let Some(value) = self
-                        .get_or_create_monitor_task(&key, getter, &target_writer)
-                        .await
-                    {
+                    if let Some(value) = self.get_or_create_monitor_task(&key, getter).await {
                         let item = Item {
                             key: key.clone(),
                             flags: 0,
