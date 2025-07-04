@@ -5,6 +5,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
@@ -52,6 +53,9 @@ async fn main() -> Result<()> {
         .target(&args.target)
         .version(env!("CARGO_PKG_VERSION"));
 
+    // Keep a reference to the original service for shutdown
+    let handler_for_shutdown = handler.clone();
+
     let service = ServiceBuilder::new()
         .timeout(Duration::from_secs(5))
         .service(handler);
@@ -64,5 +68,11 @@ async fn main() -> Result<()> {
     };
 
     server.with_monitor_tasks(monitor_tasks_for_tick);
-    server.serve(service).await
+    let _ = server.serve(service).await?;
+
+    // Shutdown the service to ensure Writer threads are properly joined
+    handler_for_shutdown.shutdown();
+
+    info!("Terminated");
+    Ok(())
 }
