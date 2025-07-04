@@ -7,6 +7,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
+use tracing::debug;
 
 pub struct MonitorTask<V> {
     // Period at getter will be called to refresh the value
@@ -152,6 +153,7 @@ where
             }
         }
 
+        debug!(key= ?key, "New MonitorTask");
         let getter_clone = getter.clone();
         let mut monitor_task = MonitorTask::new(move |key: &str| getter_clone(key))
             .interval(Duration::from_secs(5))
