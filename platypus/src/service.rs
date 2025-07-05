@@ -209,6 +209,15 @@ where
     pub fn monitor_tasks(&self) -> &MonitorTasks<String> {
         &self.monitor_tasks
     }
+
+    pub fn shutdown(self) {
+        if let Some(writer) = self.target_writer {
+            // Try to get exclusive access to the writer
+            if let Ok(writer) = Arc::try_unwrap(writer) {
+                writer.shutdown();
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -22,8 +22,6 @@ where
     V: ToMemcacheValue<Stream> + Send + Sync + 'static,
 {
     pub fn new(target_address: &str) -> Self {
-        info!(target_address = ?target_address, "New Writer");
-
         let (tx, rx) = channel::<WriteJob<V>>();
         let (shutdown_tx, shutdown_rx) = channel::<()>();
 
@@ -31,6 +29,7 @@ where
         let handle = std::thread::Builder::new()
             .name(format!("writer/{}", target_address))
             .spawn(move || {
+                info!(target_address = ?target_address, "Writer thread started");
                 let mut client = Self::client(target_address.as_str());
                 loop {
                     // Check for shutdown signal
@@ -60,6 +59,7 @@ where
                         _ = c.set(job.key.as_str(), job.value, job.ttl_secs);
                     }
                 }
+                info!(target_address = ?target_address, "Writer thread terminated");
             })
             .expect("failed to spawn memcache writer thread");
 
