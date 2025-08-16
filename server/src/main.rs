@@ -32,7 +32,7 @@ fn get_value(key: &str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + 
     let key = key.to_string();
     Box::pin(async move {
         match key.as_str() {
-            "ok" => Some(format!("value_for_{} {:?}", key, Instant::now())),
+            "test_key" => Some(format!("value_for_{} {:?}", key, Instant::now())),
             _ => None,
         }
     })
