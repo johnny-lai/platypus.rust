@@ -1,0 +1,35 @@
+# Example configuration file for platypus server
+
+[server]
+prefix = "instance/"
+target = { host = "localhost", port = 11213 }
+
+# You can have more than one routes
+# Each routes should apply to non-overlapping prefixes
+[routes.instance]
+prefix = "instance/"
+routes = [
+  { match = "{instance}/both", source = "both" },
+  { match = "{instance}/config", source = "config" },
+  { match = "{instance}/secret", source = "secret" },
+]
+
+[source.both]
+type = "map"
+merge = [{ source = "config", to = "." }, { source = "secret", to = "." }]
+
+[source.config]
+type = "http"
+url = "https://localhost/instance/{instance}/config"
+# action = GET, POST, PUT, DELETE
+action = "GET"
+# query = { instance = "{instance}" }
+# headers = { "Authorization" = "Bearer token", "Content-Type" = "application/json" }
+interval = "5s"
+ttl = "30s"
+
+[source.secret]
+type = "awssm"
+key = "/dev/{instance}/secret"
+interval = "5s"
+ttl = "30s"
