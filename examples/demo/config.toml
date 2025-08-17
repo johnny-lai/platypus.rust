@@ -9,9 +9,9 @@ target = { host = "localhost", port = 11213 }
 [routes.instance]
 prefix = "instance/"
 routes = [
-  { match = "{instance}/both", source = "both" },
-  { match = "{instance}/config", source = "config" },
-  { match = "{instance}/secret", source = "secret" },
+  { match = "^(?<instance>[^/]+)/both$", source = "both" },
+  { match = "^(?<instance>[^/]+)/config$", source = "config" },
+  { match = "^(?<instance>[^/]+)/secret$", source = "secret" },
 ]
 
 [source.both]
@@ -20,16 +20,16 @@ merge = [{ source = "config", to = "." }, { source = "secret", to = "." }]
 
 [source.config]
 type = "http"
-url = "https://localhost/instance/{instance}/config"
+url = "https://localhost/instance/%(instance)/config"
 # action = GET, POST, PUT, DELETE
 action = "GET"
 # query = { instance = "{instance}" }
 # headers = { "Authorization" = "Bearer token", "Content-Type" = "application/json" }
-interval = "5s"
-ttl = "30s"
+poll = "4s"    # Minimum is 1s
+expiry = "30s"
 
 [source.secret]
 type = "awssm"
-key = "/dev/{instance}/secret"
-interval = "5s"
-ttl = "30s"
+key = "/dev/%(instance)/secret"
+poll = "5s"
+expiry = "300s"                 # <- time we will keep polling for.

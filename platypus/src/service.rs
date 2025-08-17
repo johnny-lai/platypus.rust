@@ -1,5 +1,5 @@
-use crate::AsyncGetter;
 use crate::protocol::{self, Command, Item, Response};
+use crate::router::Router;
 use crate::{MonitorTasks, Writer};
 use anyhow::Result;
 use std::future::Future;
@@ -10,20 +10,14 @@ use tower;
 use tracing::info;
 
 #[derive(Clone)]
-pub struct Service<F>
-where
-    F: AsyncGetter,
-{
-    getter: Option<Arc<F>>,
-    monitor_tasks: MonitorTasks<String>,
-    target_writer: Option<Arc<Writer<String>>>,
+pub struct Service {
+    router: Option<Arc<Router>>,
+    monitor_tasks: MonitorTasks,
+    target_writer: Option<Arc<Writer>>,
     version: String,
 }
 
-impl<F> tower::Service<protocol::CommandContext> for Service<F>
-where
-    F: AsyncGetter,
-{
+impl tower::Service<protocol::CommandContext> for Service {
     type Response = protocol::Response;
     type Error = crate::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
@@ -43,30 +37,27 @@ where
     }
 }
 
-impl<F> Service<F>
-where
-    F: AsyncGetter,
-{
+impl Service {
     pub fn new() -> Self {
         Self::with_monitor_tasks(MonitorTasks::new())
     }
 
-    pub fn with_monitor_tasks(monitor_tasks: MonitorTasks<String>) -> Self {
+    pub fn with_monitor_tasks(monitor_tasks: MonitorTasks) -> Self {
         Self {
-            getter: None,
+            router: None,
             monitor_tasks,
             target_writer: None,
             version: "0.0.0".into(),
         }
     }
 
-    pub fn getter(mut self, f: F) -> Self {
-        self.getter = Some(Arc::new(f));
+    pub fn router(mut self, router: Router) -> Self {
+        self.router = Some(Arc::new(router));
         self
     }
 
     pub fn target(mut self, target_address: &str) -> Self {
-        self.target_writer = Some(Arc::new(Writer::<String>::new(target_address)));
+        self.target_writer = Some(Arc::new(Writer::new(target_address)));
         self
     }
 
@@ -75,20 +66,20 @@ where
         self
     }
 
-    async fn get_or_create_monitor_task(&self, key: &str, getter: &Arc<F>) -> Option<String> {
+    async fn get_or_create_monitor_task(&self, key: &str, router: Arc<Router>) -> Option<String> {
         self.monitor_tasks
-            .get_or_create_task(key, getter, &self.target_writer)
+            .get_or_create_task(key, router, &self.target_writer)
             .await
     }
 
     async fn handle_command(&self, command: Command) -> anyhow::Result<Response> {
-        if let Some(getter) = &self.getter {
+        if let Some(router) = &self.router {
             match command {
                 Command::Get(keys) => {
                     info!(keys = ?keys, "GET command");
                     let mut items = Vec::new();
                     for key in &keys {
-                        match self.get_or_create_monitor_task(key, getter).await {
+                        match self.get_or_create_monitor_task(key, router.clone()).await {
                             Some(value) => {
                                 let item = Item {
                                     key: key.clone(),
@@ -108,7 +99,7 @@ where
                     info!(keys = ?keys, "GETS command");
                     let mut items = Vec::new();
                     for key in &keys {
-                        match self.get_or_create_monitor_task(key, getter).await {
+                        match self.get_or_create_monitor_task(key, router.clone()).await {
                             Some(value) => {
                                 let item = Item {
                                     key: key.clone(),
@@ -156,7 +147,8 @@ where
                 }
                 Command::MetaGet(key, flags) => {
                     info!(key = key, flags = ?flags, "META GET command");
-                    if let Some(value) = self.get_or_create_monitor_task(&key, getter).await {
+                    if let Some(value) = self.get_or_create_monitor_task(&key, router.clone()).await
+                    {
                         let item = Item {
                             key: key.clone(),
                             flags: 0,
@@ -206,7 +198,7 @@ where
         self.monitor_tasks.tick().await;
     }
 
-    pub fn monitor_tasks(&self) -> &MonitorTasks<String> {
+    pub fn monitor_tasks(&self) -> &MonitorTasks {
         &self.monitor_tasks
     }
 
@@ -227,6 +219,6 @@ mod tests {
     #[test]
     fn test_monitor_tasks_exists() {
         // Just test that MonitorTasks can be created
-        let _monitor_tasks: MonitorTasks<String> = MonitorTasks::new();
+        let _monitor_tasks: MonitorTasks = MonitorTasks::new();
     }
 }

@@ -5,10 +5,12 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+async-trait = "0.1.89"
 byteorder.workspace = true
 futures.workspace = true
 log.workspace = true
 memcache.workspace = true
+regex.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

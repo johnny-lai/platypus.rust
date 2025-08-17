@@ -20,7 +20,7 @@ pub enum SocketType {
 pub struct Server {
     socket_config: SocketType,
     notify_shutdown: Arc<Notify>,
-    monitor_tasks: Option<MonitorTasks<String>>,
+    monitor_tasks: Option<MonitorTasks>,
 }
 
 impl Server {
@@ -54,7 +54,7 @@ impl Server {
         }
     }
 
-    pub fn with_monitor_tasks(&mut self, monitor_tasks: MonitorTasks<String>) -> &mut Self {
+    pub fn with_monitor_tasks(&mut self, monitor_tasks: MonitorTasks) -> &mut Self {
         self.monitor_tasks = Some(monitor_tasks);
         self
     }

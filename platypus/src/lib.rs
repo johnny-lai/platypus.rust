@@ -1,16 +1,26 @@
+use std::pin::Pin;
 use thiserror::Error;
 
 pub mod monitor;
 pub mod protocol;
+pub mod request;
+pub mod response;
+pub mod router;
 pub mod server;
 pub mod service;
+pub mod source;
 pub mod writer;
 
 pub use monitor::{MonitorTask, MonitorTasks};
+pub use request::Request;
+pub use response::Response;
+pub use router::Router;
 pub use server::Server;
 pub use service::Service;
-use std::pin::Pin;
+pub use source::Source;
 pub use writer::Writer;
+
+pub use source::source;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -26,17 +36,15 @@ pub enum Error {
     Other(#[from] anyhow::Error),
 }
 
+pub type Value = String;
+
 pub trait AsyncGetter:
-    Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>>
-    + Clone
-    + Send
-    + Sync
-    + 'static
+    Fn(&Request) -> Pin<Box<dyn Future<Output = Response> + Send + '_>> + Clone + Send + Sync + 'static
 {
 }
 
 impl<F> AsyncGetter for F where
-    F: Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>>
+    F: Fn(&Request) -> Pin<Box<dyn Future<Output = Response> + Send + '_>>
         + Clone
         + Send
         + Sync
