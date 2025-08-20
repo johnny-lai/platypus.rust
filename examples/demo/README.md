@@ -64,4 +64,4 @@ On first request:
 
 ## Cleanup
 
-The demo script handles cleanup automatically. Press Ctrl+C to stop all services.
+The `./server.sh` script handles cleanup automatically. Press Ctrl+C to stop all services.
