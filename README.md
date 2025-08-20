@@ -56,26 +56,9 @@ Server::bind("127.0.0.1:11212")
     .await
 ```
 
-## Configuration files
+## Demo
 
-```
-[get.<get_name>]
-match = quickstart/(.*)
-source = <source_name1>
-
-[source.<source_name1>]
-type = awssm
-key = some/prefix/{1}
-
-[source.<source_name2>]
-type = http
-url = http://localhost:123/stuff/{1}
-action = GET
-
-[target]
-host = localhost
-port = 11213
-```
+See [examples/demo/README.md](examples/demo/README.md)
 
 ## Compatibility with Rails.cache
 
