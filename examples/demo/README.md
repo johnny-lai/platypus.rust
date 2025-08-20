@@ -25,7 +25,7 @@ Client --> memcached-proxy (port 21211) --> warm cache (port 21213)
 - Rust toolchain
 - libevent (install via `brew install libevent` on macOS)
 
-### Build and Run`
+### Build and Run
 
 1. **Start the demo:**
    ```bash
