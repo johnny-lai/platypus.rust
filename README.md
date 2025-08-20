@@ -30,8 +30,27 @@ Start a platypus server that:
 * Result is written to memcached on port `11213`
 
 ```
+let router = Router::new()
+  .route(
+      "test_(?<instance>.*)",
+      source(|key| async move {
+          Some(format!("test {key} at {:?}", Instant::now()).to_string())
+      })
+      .with_ttl(Duration::from_secs(5))
+      .with_expiry(Duration::from_secs(30))
+      .with_box(),
+  )
+  .route(
+      "other_(?<instance>.*)",
+      source(|key| async move {
+          Some(format!("other {key} at {:?}", Instant::now()).to_string())
+      })
+      .with_ttl(Duration::from_secs(5))
+      .with_expiry(Duration::from_secs(30))
+      .with_box(),
+  )
 Server::bind("127.0.0.1:11212")
-    .getter(|key: &str| format!("value_for_{}", key))
+    .router(router)
     .target("memcache://127.0.0.1:11213")
     .run()
     .await

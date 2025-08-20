@@ -1,6 +1,6 @@
 [package]
 name = "server"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
@@ -9,8 +9,10 @@ clap.workspace = true
 futures.workspace = true
 log.workspace = true
 platypus = { path = "../platypus" }
+serde.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+toml.workspace = true
 tower.workspace = true
 tracing.workspace = true
 tracing-log.workspace = true

@@ -1,12 +1,14 @@
 use anyhow::{Result, anyhow};
 use clap::Parser;
-use platypus::{MonitorTasks, Server, Service};
-use std::future::Future;
-use std::pin::Pin;
-use std::time::{Duration, Instant};
+use platypus::{MonitorTasks, Router, Server, Service, source};
+use std::time::Duration;
+use tokio::time::Instant;
 use tower::ServiceBuilder;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+mod config;
+use config::Config;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -26,16 +28,15 @@ struct Args {
     /// Log format: json or text
     #[arg(long, default_value = "text")]
     log_format: String,
+
+    /// Configuration file path
+    #[arg(short, long)]
+    config: Option<String>,
 }
 
-fn get_value(key: &str) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>> {
-    let key = key.to_string();
-    Box::pin(async move {
-        match key.as_str() {
-            "test_key" => Some(format!("value_for_{} {:?}", key, Instant::now())),
-            _ => None,
-        }
-    })
+fn build_router_from_config(_: &Config) -> Result<Router> {
+    // TODO: Implement
+    Ok(Router::new())
 }
 
 #[tokio::main]
@@ -46,7 +47,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     let env_filter =
-        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "debug".into());
 
     match args.log_format.as_str() {
         "json" => {
@@ -99,12 +100,59 @@ async fn main() -> Result<()> {
 
     info!("Server starting");
 
+    // Load configuration if provided
+    let config = if let Some(config_path) = &args.config {
+        Some(Config::from_file(config_path)?)
+    } else {
+        None
+    };
+
+    // Determine target from config or CLI args (CLI takes precedence)
+    let target = if let Some(ref cfg) = config {
+        if let Some(ref server_config) = cfg.server {
+            if let Some(ref target_config) = server_config.target {
+                target_config.to_url()
+            } else {
+                args.target.clone()
+            }
+        } else {
+            args.target.clone()
+        }
+    } else {
+        args.target.clone()
+    };
+
     let monitor_tasks = MonitorTasks::new();
     let monitor_tasks_for_tick = monitor_tasks.clone();
 
+    // Build router from config or use default routes
+    let router = if let Some(ref cfg) = config {
+        build_router_from_config(cfg)?
+    } else {
+        Router::new()
+            .route(
+                "test_(?<instance>.*)",
+                source(|key| async move {
+                    Some(format!("test {key} at {:?}", Instant::now()).to_string())
+                })
+                .with_ttl(Duration::from_secs(5))
+                .with_expiry(Duration::from_secs(30))
+                .with_box(),
+            )
+            .route(
+                "other_(?<instance>.*)",
+                source(|key| async move {
+                    Some(format!("other {key} at {:?}", Instant::now()).to_string())
+                })
+                .with_ttl(Duration::from_secs(5))
+                .with_expiry(Duration::from_secs(30))
+                .with_box(),
+            )
+    };
+
     let handler = Service::with_monitor_tasks(monitor_tasks)
-        .getter(get_value)
-        .target(&args.target)
+        .router(router)
+        .target(&target)
         .version(env!("CARGO_PKG_VERSION"));
 
     // Keep a reference to the original service for shutdown

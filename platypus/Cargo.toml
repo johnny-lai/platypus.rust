@@ -1,14 +1,16 @@
 [package]
 name = "platypus"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
+async-trait = "0.1.89"
 byteorder.workspace = true
 futures.workspace = true
 log.workspace = true
 memcache.workspace = true
+regex.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
