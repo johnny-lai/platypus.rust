@@ -55,5 +55,7 @@ echo "All dependent services are running!"
 
 # 3. If an entry is not in the warm cache, then it get routed to playtpus.
 #    This is last. When this quits, all the other services will be killed.
-cargo run --bin server -- -b 127.0.0.1:$COLD_PORT -t 127.0.0.1:$WARM_PORT
+cargo run --bin server -- \
+    -b 127.0.0.1:$COLD_PORT \
+    -t memcache://127.0.0.1:$WARM_PORT
 COLD_PID=$!
