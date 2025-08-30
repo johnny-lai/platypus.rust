@@ -4,6 +4,7 @@ members = ["platypus", "server"]
 
 [workspace.dependencies]
 anyhow = { version = "1.0.98", default-features = true }
+async-trait = "0.1.89"
 byteorder = "1.5.0"
 clap = { version = "4.5.40", features = ["derive"] }
 futures = "0.3.31"

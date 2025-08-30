@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow.workspace = true
-async-trait = "0.1.89"
+async-trait.workspace = true
 byteorder.workspace = true
 futures.workspace = true
 log.workspace = true
