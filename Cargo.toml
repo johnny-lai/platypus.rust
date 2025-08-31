@@ -1,8 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["platypus", "server"]
+members = ["platypus", "server", "tests"]
 
 [workspace.dependencies]
+async-memcached = "0.5.0"
 anyhow = { version = "1.0.98", default-features = true }
 async-trait = "0.1.89"
 byteorder = "1.5.0"

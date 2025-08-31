@@ -146,7 +146,7 @@ impl BinaryHeader {
 /// opaque will be copied back into the response.
 pub fn parse_binary(data: &[u8]) -> Result<(Command, u32, usize)> {
     if data.len() < 24 {
-        return Err(anyhow!("Binary packet too small"));
+        return Err(anyhow!("Binary packet too small {:?}", data));
     }
 
     let mut cursor = Cursor::new(data);

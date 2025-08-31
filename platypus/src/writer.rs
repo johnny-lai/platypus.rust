@@ -167,7 +167,11 @@ mod tests {
     #[test]
     fn test_writer_send_with_zero_ttl() {
         let writer = Writer::new("127.0.0.1:11211");
-        let result = writer.send("test_key", Some("test_value".to_string()), Duration::from_secs(0));
+        let result = writer.send(
+            "test_key",
+            Some("test_value".to_string()),
+            Duration::from_secs(0),
+        );
         assert!(result.is_ok());
         writer.shutdown();
     }

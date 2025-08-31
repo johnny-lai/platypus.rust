@@ -2,9 +2,9 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,17 +17,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Set version
-      run: sed -i 's/^version = "\(.*\)"$/version = "\1+${{ github.run_number }}"/' server/Cargo.toml
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
-    - name: Tag version
-      if: github.ref == 'refs/heads/main'
-      run: |
-        git config --global user.name 'github-actions[bot]'
-        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-        git tag -a "build/${{ github.run_number }}" -m "Build ${{ github.run_number }}"
-        git push origin "build/${{ github.run_number }}"
+      - name: Install libevent-dev
+        run: sudo apt-get -y install libevent-dev
+      - uses: actions/checkout@v4
+      - name: Set version
+        run: sed -i 's/^version = "\(.*\)"$/version = "\1+${{ github.run_number }}"/' server/Cargo.toml
+      - name: Build
+        run: cargo build --verbose
+      - name: Run tests
+        run: cargo test --verbose
+      - name: Tag version
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -a "build/${{ github.run_number }}" -m "Build ${{ github.run_number }}"
+          git push origin "build/${{ github.run_number }}"
