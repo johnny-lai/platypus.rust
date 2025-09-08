@@ -3,7 +3,7 @@ use memcache::MemcacheError;
 use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
 use std::thread::JoinHandle;
 use tokio::time::Duration;
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Clone)]
 pub struct WriteJob {
@@ -90,13 +90,19 @@ impl Writer {
         target_address: &str,
         job: WriteJob,
     ) -> Result<memcache::Client, MemcacheError> {
-        if let Ok(ref c) = client {
-            info!(target_address = ?target_address, key = job.key.as_str(),  "Wrote");
-            let err = match job.value {
-                Some(value) => c.set(job.key.as_str(), value, job.ttl_secs).err(),
-                None => c.delete(job.key.as_str()).err(),
-            };
-            if let Some(MemcacheError::IOError(_)) = err {
+        match client {
+            Ok(ref c) => {
+                info!(target_address = ?target_address, key = job.key.as_str(),  "Wrote");
+                let err = match job.value {
+                    Some(value) => c.set(job.key.as_str(), value, job.ttl_secs).err(),
+                    None => c.delete(job.key.as_str()).err(),
+                };
+                if let Some(MemcacheError::IOError(_)) = err {
+                    return Self::client(target_address);
+                }
+            }
+            Err(err) => {
+                error!(error = ?err, "client was not connected");
                 return Self::client(target_address);
             }
         }
@@ -161,7 +167,11 @@ mod tests {
     #[test]
     fn test_writer_send_with_zero_ttl() {
         let writer = Writer::new("127.0.0.1:11211");
-        let result = writer.send("test_key", Some("test_value".to_string()), Duration::from_secs(0));
+        let result = writer.send(
+            "test_key",
+            Some("test_value".to_string()),
+            Duration::from_secs(0),
+        );
         assert!(result.is_ok());
         writer.shutdown();
     }

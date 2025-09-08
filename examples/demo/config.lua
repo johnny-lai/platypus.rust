@@ -2,12 +2,12 @@ local warm_port = os.getenv("WARM_PORT")
 local cold_port = os.getenv("COLD_PORT")
 
 pools {
-    quickstart_pool = {
+    warm_pool = {
         backends = {
             "127.0.0.1:" .. warm_port,
         }
     },
-    fallback = {
+    cold_pool = {
         backends = {
             "127.0.0.1:" .. cold_port,
         }
@@ -15,10 +15,8 @@ pools {
 }
 
 routes {
-    map = {
-        quickstart = route_direct {
-            child = "quickstart_pool",
-        },
-    },
-    default = route_direct { child = "fallback" }
+    default = route_failover {
+        children = { "warm_pool", "cold_pool" },
+        miss = true, -- failover on miss
+    }
 }
