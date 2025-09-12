@@ -1,0 +1,3 @@
+[server]
+prefix = "toml-test/"
+target = { host = "localhost", port = 11213 }

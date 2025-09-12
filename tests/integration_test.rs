@@ -1,5 +1,5 @@
 use async_memcached::AsciiProtocol;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU16, Ordering};
@@ -133,7 +133,7 @@ async fn test_cache_miss_flow() {
         .await
         .expect("Failed to connect to warm cache");
 
-    let test_key = "test_integration_key";
+    let test_key = "echo1/abc";
 
     // 1. Verify key doesn't exist in warm cache initially
     let warm_result = warm_client.get(test_key).await;
@@ -154,9 +154,9 @@ async fn test_cache_miss_flow() {
         "Should get value from platypus on cache miss"
     );
     let value = String::from_utf8(proxy_result.unwrap().data.unwrap()).unwrap();
-    assert!(
-        value.starts_with("test test_integration_key at"),
-        "Value should match expected format from platypus"
+    assert_eq!(
+        "echo1 = abc", value,
+        "Value should match expected result from echo1 source"
     );
 
     // Wait a little to get platypus a chance to update the warm cache
@@ -272,7 +272,7 @@ async fn test_background_refresh() {
         .await
         .expect("Failed to connect to warm cache");
 
-    let test_key = "test_background_refresh_key";
+    let test_key = "echo1/abc";
 
     // 1. Initial request to populate cache
     let initial_result = proxy_client
@@ -285,7 +285,7 @@ async fn test_background_refresh() {
     );
     let initial_value = String::from_utf8(initial_result.unwrap().data.unwrap()).unwrap();
     assert!(
-        initial_value.starts_with("test test_background_refresh_key at"),
+        initial_value.starts_with("echo1 = abc"),
         "Should match expected format"
     );
 
@@ -320,7 +320,7 @@ async fn test_background_refresh() {
 
     let refreshed_value = String::from_utf8(refreshed_result.unwrap().data.unwrap()).unwrap();
     assert!(
-        refreshed_value.starts_with("test test_background_refresh_key at"),
+        refreshed_value.starts_with("echo1 = abc"),
         "Refreshed value should match expected format"
     );
 
@@ -461,6 +461,8 @@ routes {{
             &format!("127.0.0.1:{}", ports.cold_port),
             "-t",
             &format!("memcache://127.0.0.1:{}", ports.warm_port),
+            "-c",
+            "tests/config.toml",
         ])
         .current_dir(root_dir) // Run from workspace root
         .stdin(Stdio::null())

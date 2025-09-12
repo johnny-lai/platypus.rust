@@ -1,13 +1,11 @@
 # Example configuration file for platypus server
 
 [server]
-prefix = "instance/"
 target = { host = "localhost", port = 11213 }
 
 # You can have more than one routes
 # Each routes should apply to non-overlapping prefixes
 [routes.instance]
-prefix = "instance/"
 routes = [
   { match = "^(?<instance>[^/]+)/both$", source = "both" },
   { match = "^(?<instance>[^/]+)/config$", source = "config" },
@@ -25,11 +23,11 @@ url = "https://localhost/instance/%(instance)/config"
 action = "GET"
 # query = { instance = "{instance}" }
 # headers = { "Authorization" = "Bearer token", "Content-Type" = "application/json" }
-poll = "4s"    # Minimum is 1s
+ttl = "4s"
 expiry = "30s"
 
 [source.secret]
 type = "awssm"
 key = "/dev/%(instance)/secret"
-poll = "5s"
+ttl = "5s"
 expiry = "300s"                 # <- time we will keep polling for.

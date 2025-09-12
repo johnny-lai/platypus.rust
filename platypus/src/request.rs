@@ -23,6 +23,7 @@ impl Request {
                 captures.insert(name.into(), matched.as_str().into());
             }
         }
+        captures.insert("$key".to_string(), key.to_string());
         Some(Self {
             key: key.into(),
             captures,
@@ -37,6 +38,10 @@ impl Request {
     // Returns a named captured value
     pub fn get(&self, k: &str) -> Option<&str> {
         self.captures.get(k).map(|s| s.as_str())
+    }
+
+    pub fn captures(&self) -> &HashMap<String, String> {
+        &self.captures
     }
 }
 

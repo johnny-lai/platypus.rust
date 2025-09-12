@@ -3,6 +3,12 @@ use std::time::Duration;
 use crate::{Request, Response};
 use async_trait::async_trait;
 
+mod echo;
+pub use echo::Echo;
+
+mod http;
+pub use http::Http;
+
 #[async_trait]
 pub trait Source: Send + Sync + 'static {
     async fn call(&self, request: &Request) -> Response;

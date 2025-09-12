@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::pin::Pin;
 use thiserror::Error;
 
@@ -52,6 +53,42 @@ impl<F> AsyncGetter for F where
 {
 }
 
+pub fn replace_placeholders(text: &str, replacements: &HashMap<String, String>) -> String {
+    let mut ret = String::new();
+    let mut placeholders: Vec<String> = Vec::new();
+
+    for (_i, ch) in text.chars().enumerate() {
+        match ch {
+            '{' => {
+                placeholders.push(String::new());
+            }
+            '}' => {
+                if let Some(placeholder) = placeholders.pop() {
+                    match replacements.get(&placeholder) {
+                        Some(replacement) => {
+                            if let Some(parent) = placeholders.last_mut() {
+                                parent.push_str(&replacement);
+                            } else {
+                                ret.push_str(&replacement);
+                            }
+                        }
+                        None => {}
+                    }
+                }
+            }
+            _ => {
+                if let Some(current) = placeholders.last_mut() {
+                    current.push(ch);
+                } else {
+                    ret.push(ch);
+                }
+            }
+        }
+    }
+
+    ret
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +127,45 @@ mod tests {
         #[allow(dead_code)]
         fn test_trait_bound<T: AsyncGetter>(_: T) {}
         // This test passes if the trait compiles correctly
+    }
+
+    #[test]
+    fn test_replace_placeholders() {
+        let mut placeholders = HashMap::new();
+        placeholders.insert("name".to_string(), "Alice".to_string());
+        placeholders.insert("age".to_string(), "30".to_string());
+
+        let template = "Hello {name}, you are {age} years old";
+        let result = replace_placeholders(template, &placeholders);
+        assert_eq!(result, "Hello Alice, you are 30 years old");
+    }
+
+    #[test]
+    fn test_replace_placeholders_no_matches() {
+        let placeholders = HashMap::new();
+        let template = "Hello {name}";
+        let result = replace_placeholders(template, &placeholders);
+        assert_eq!(result, "Hello ");
+    }
+
+    #[test]
+    fn test_replace_placeholders_multiple_occurrences() {
+        let mut placeholders = HashMap::new();
+        placeholders.insert("word".to_string(), "test".to_string());
+
+        let template = "{word} {word} {word}";
+        let result = replace_placeholders(template, &placeholders);
+        assert_eq!(result, "test test test");
+    }
+
+    #[test]
+    fn test_replace_placeholders_nested_occurrences() {
+        let mut placeholders = HashMap::new();
+        placeholders.insert("word".to_string(), "test".to_string());
+        placeholders.insert("test".to_string(), "other".to_string());
+
+        let template = "{{word}} {{word}} {{word}}";
+        let result = replace_placeholders(template, &placeholders);
+        assert_eq!(result, "other other other");
     }
 }
