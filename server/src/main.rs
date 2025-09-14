@@ -1,8 +1,7 @@
 use anyhow::{Result, anyhow};
 use clap::Parser;
-use platypus::{MonitorTasks, Router, Server, Service, source};
+use platypus::{MonitorTasks, Server, Service};
 use std::time::Duration;
-use tokio::time::Instant;
 use tower::ServiceBuilder;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -32,11 +31,6 @@ struct Args {
     /// Configuration file path
     #[arg(short, long)]
     config: Option<String>,
-}
-
-fn build_router_from_config(_: &Config) -> Result<Router> {
-    // TODO: Implement
-    Ok(Router::new())
 }
 
 #[tokio::main]
@@ -98,61 +92,27 @@ async fn main() -> Result<()> {
     let span = tracing::info_span!("application", version = %version, pid = %pid);
     let _guard = span.enter();
 
-    info!("Server starting");
-
     // Load configuration if provided
     let config = if let Some(config_path) = &args.config {
-        Some(Config::from_file(config_path)?)
+        Config::from_file(config_path)?
     } else {
-        None
+        return Err(anyhow!("No config file specified"));
     };
 
-    // Determine target from config or CLI args (CLI takes precedence)
-    let target = if let Some(ref cfg) = config {
-        if let Some(ref server_config) = cfg.server {
-            if let Some(ref target_config) = server_config.target {
-                target_config.to_url()
-            } else {
-                args.target.clone()
-            }
-        } else {
-            args.target.clone()
-        }
-    } else {
-        args.target.clone()
-    };
+    info!(config = ?config, "Server starting");
+
+    // Determine target from CLI args
+    let target = args.target.clone();
 
     let monitor_tasks = MonitorTasks::new();
     let monitor_tasks_for_tick = monitor_tasks.clone();
 
     // Build router from config or use default routes
-    let router = if let Some(ref cfg) = config {
-        build_router_from_config(cfg)?
-    } else {
-        Router::new()
-            .route(
-                "test_(?<instance>.*)",
-                source(|key| async move {
-                    Some(format!("test {key} at {:?}", Instant::now()).to_string())
-                })
-                .with_ttl(Duration::from_secs(5))
-                .with_expiry(Duration::from_secs(30))
-                .with_box(),
-            )
-            .route(
-                "other_(?<instance>.*)",
-                source(|key| async move {
-                    Some(format!("other {key} at {:?}", Instant::now()).to_string())
-                })
-                .with_ttl(Duration::from_secs(5))
-                .with_expiry(Duration::from_secs(30))
-                .with_box(),
-            )
-    };
+    let router = config.to_router()?;
 
     let handler = Service::with_monitor_tasks(monitor_tasks)
         .router(router)
-        .target(&target)
+        .target(target.as_str())
         .version(env!("CARGO_PKG_VERSION"));
 
     // Keep a reference to the original service for shutdown

@@ -1,0 +1,17 @@
+# Example configuration file for platypus server
+
+# You can have more than one routes
+# Each routes should apply to non-overlapping prefixes
+[routes.instance]
+routes = [
+  { match = "^echo1/(?<path>.+)", source = "echo1" },
+  { match = "^echo2/(?<path>.+)", source = "echo2" },
+]
+
+[source.echo1]
+type = "echo"
+template = "echo1 = {path}"
+
+[source.echo2]
+type = "echo"
+template = "echo2 = {path}"

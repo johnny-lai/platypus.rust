@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+config.workspace = true
 futures.workspace = true
+humantime.workspace = true
 log.workspace = true
 platypus = { path = "../platypus" }
 serde.workspace = true
