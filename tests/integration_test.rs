@@ -354,6 +354,131 @@ async fn test_background_refresh() {
     // TestServices will automatically cleanup when dropped
 }
 
+#[tokio::test]
+async fn test_merge_source_functionality() {
+    let services = setup_test_services().await;
+
+    // Connect to the proxy (entry point)
+    let mut proxy_client = services
+        .proxy_client()
+        .await
+        .expect("Failed to connect to proxy");
+
+    // Connect directly to warm cache to verify caching behavior
+    let mut warm_client = services
+        .warm_client()
+        .await
+        .expect("Failed to connect to warm cache");
+
+    let test_key = "both/test_data";
+
+    // 1. Verify key doesn't exist in warm cache initially
+    let warm_result = warm_client.get(test_key).await;
+    assert!(
+        warm_result.unwrap().is_none(),
+        "Key should not exist in warm cache initially"
+    );
+
+    // 2. Request merge endpoint through proxy - should trigger merge source
+    let proxy_result = proxy_client
+        .get(test_key)
+        .await
+        .expect("Failed to get from proxy");
+
+    // 3. Should get a merged JSON value from both echo1 and echo2 sources
+    assert!(
+        proxy_result.is_some(),
+        "Should get merged value from merge source"
+    );
+
+    let value = String::from_utf8(proxy_result.unwrap().data.unwrap()).unwrap();
+    println!("Received merged value: {}", value);
+
+    // 4. Parse and validate the JSON structure
+    let json_value: serde_json::Value = serde_json::from_str(&value)
+        .expect("Response should be valid JSON");
+
+    // Should be a JSON object with echo1 and echo2 keys
+    assert!(json_value.is_object(), "Response should be a JSON object");
+    let json_obj = json_value.as_object().unwrap();
+
+    // Verify both echo1 and echo2 responses are present
+    assert!(json_obj.contains_key("echo1"), "Should contain echo1 response");
+    assert!(json_obj.contains_key("echo2"), "Should contain echo2 response");
+
+    // Verify the merged content matches expected pattern
+    assert_eq!(
+        json_obj["echo1"].as_str().unwrap(),
+        "echo1 = test_data",
+        "echo1 response should match expected format"
+    );
+    assert_eq!(
+        json_obj["echo2"].as_str().unwrap(),
+        "echo2 = test_data",
+        "echo2 response should match expected format"
+    );
+
+    // Wait a little to give platypus a chance to update the warm cache
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // 5. Verify the merged value is now in warm cache
+    let warm_result = warm_client
+        .get(test_key)
+        .await
+        .expect("Failed to get from warm cache");
+    assert!(warm_result.is_some(), "Merged value should now exist in warm cache");
+
+    let cached_value = String::from_utf8(warm_result.unwrap().data.unwrap()).unwrap();
+    assert_eq!(
+        cached_value, value,
+        "Warm cache should contain the same merged JSON value"
+    );
+
+    // 6. Request again through proxy - should get from warm cache (cache hit)
+    let second_proxy_result = proxy_client
+        .get(test_key)
+        .await
+        .expect("Failed to get from proxy second time");
+    assert!(
+        second_proxy_result.is_some(),
+        "Should get cached merged value from warm cache"
+    );
+
+    let second_value = String::from_utf8(second_proxy_result.unwrap().data.unwrap()).unwrap();
+    assert_eq!(
+        second_value, value,
+        "Should get same cached merged value"
+    );
+
+    // 7. Test with different path to ensure dynamic behavior
+    let test_key2 = "both/different_path";
+    let proxy_result2 = proxy_client
+        .get(test_key2)
+        .await
+        .expect("Failed to get second merge request");
+
+    assert!(proxy_result2.is_some(), "Should get value for different path");
+    let value2 = String::from_utf8(proxy_result2.unwrap().data.unwrap()).unwrap();
+
+    let json_value2: serde_json::Value = serde_json::from_str(&value2)
+        .expect("Second response should be valid JSON");
+    let json_obj2 = json_value2.as_object().unwrap();
+
+    // Should have different path values but same structure
+    assert_eq!(
+        json_obj2["echo1"].as_str().unwrap(),
+        "echo1 = different_path",
+        "echo1 should reflect different path"
+    );
+    assert_eq!(
+        json_obj2["echo2"].as_str().unwrap(),
+        "echo2 = different_path",
+        "echo2 should reflect different path"
+    );
+
+    // TestServices will automatically cleanup when dropped
+}
+
 async fn setup_memcached() -> PathBuf {
     // Get the mutex to ensure only one thread allocates ports at a time
     let mutex = SETUP_MEMCACHED_MUTEX.get_or_init(|| Mutex::new(()));

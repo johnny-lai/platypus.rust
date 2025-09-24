@@ -1,9 +1,13 @@
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::Arc;
+use crate::Sources;
 
+#[derive(Clone)]
 pub struct Request {
     key: String,
     captures: HashMap<String, String>,
+    sources: Option<Arc<Sources>>,
 }
 
 impl Request {
@@ -11,6 +15,7 @@ impl Request {
         Self {
             key: key.into(),
             captures: HashMap::new(),
+            sources: None,
         }
     }
     pub fn match_regex(re: &Regex, key: &str) -> Option<Self> {
@@ -27,6 +32,7 @@ impl Request {
         Some(Self {
             key: key.into(),
             captures,
+            sources: None,
         })
     }
 
@@ -42,6 +48,20 @@ impl Request {
 
     pub fn captures(&self) -> &HashMap<String, String> {
         &self.captures
+    }
+
+    pub fn sources(&self) -> Option<&Arc<Sources>> {
+        self.sources.as_ref()
+    }
+
+    pub fn with_sources(mut self, sources: Arc<Sources>) -> Self {
+        self.sources = Some(sources);
+        self
+    }
+
+    pub fn with_captures(mut self, captures: HashMap<String, String>) -> Self {
+        self.captures = captures;
+        self
     }
 }
 

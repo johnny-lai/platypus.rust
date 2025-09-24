@@ -1,7 +1,5 @@
-use crate::Source;
-use crate::request::Request;
+use crate::Request;
 use regex::Regex;
-use std::sync::Arc;
 
 macro_rules! panic_on_err {
     ($expr:expr) => {
@@ -15,22 +13,25 @@ macro_rules! panic_on_err {
 pub enum Error {}
 
 pub struct Rule {
-    re: Regex,
-    source: Arc<Box<dyn Source>>,
+    patten: Regex,
+    source: String,
 }
 
 impl Rule {
-    pub fn new(pattern: &str, source: Arc<Box<dyn Source>>) -> Result<Self, regex::Error> {
+    pub fn new(pattern: &str, source: impl Into<String>) -> Result<Self, regex::Error> {
         let re = Regex::new(pattern)?;
-        Ok(Self { re, source })
+        Ok(Self {
+            patten: re,
+            source: source.into(),
+        })
     }
 
     pub fn match_key(&self, key: &str) -> Option<Request> {
-        Request::match_regex(&self.re, key)
+        Request::match_regex(&self.patten, key)
     }
 
-    pub fn source(&self) -> Arc<Box<dyn Source>> {
-        self.source.clone()
+    pub fn source(&self) -> &String {
+        &self.source
     }
 }
 
@@ -45,8 +46,8 @@ impl Router {
         }
     }
 
-    pub fn route(mut self, pattern: &str, source: Box<dyn Source + Send + 'static>) -> Self {
-        let rule = panic_on_err!(Rule::new(pattern, Arc::new(source)));
+    pub fn route(mut self, pattern: &str, source: impl Into<String>) -> Self {
+        let rule = panic_on_err!(Rule::new(pattern, source));
         self.rules.push_back(rule);
         self
     }

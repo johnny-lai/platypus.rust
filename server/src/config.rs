@@ -1,30 +1,52 @@
 use humantime::parse_duration;
 use platypus::{
-    Router, Source,
+    Router, Source, source,
     source::{Echo, Http},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::default::Default;
+use std::fmt;
+use std::sync::Arc;
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
-pub struct Config {
-    pub routes: HashMap<String, RouteGroupConfig>,
-    pub source: HashMap<String, SourceConfig>,
-}
-
+//- Merge ---------------------------------------------------------------------
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RouteGroupConfig {
-    pub routes: Vec<RouteConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RouteConfig {
-    #[serde(rename = "match")]
-    pub pattern: String,
+pub struct MergeConfig {
     pub source: String,
+    pub to: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum MergeRuleArgsConfig {
+    #[serde(rename = "inherit")]
+    Inherit,
+
+    #[serde(rename = "replace")]
+    Replace {
+        #[serde(flatten)]
+        args: HashMap<String, String>,
+    },
+}
+
+impl MergeRuleArgsConfig {
+    pub fn to_rule_args(&self) -> source::merge::RuleArgs {
+        match &self {
+            MergeRuleArgsConfig::Inherit => source::merge::RuleArgs::Inherit {},
+            MergeRuleArgsConfig::Replace { args } => {
+                source::merge::RuleArgs::Replace { args: args.clone() }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct MergeRuleConfig {
+    pub key: Vec<String>,
+    pub source: String,
+    pub args: MergeRuleArgsConfig,
+}
+
+//- Source --------------------------------------------------------------------
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum SourceConfig {
@@ -44,34 +66,17 @@ pub enum SourceConfig {
         ttl: Option<String>,
         expiry: Option<String>,
     },
-    Map {
-        merge: Vec<MergeConfig>,
+    Merge {
+        format: String,
+        template: Vec<MergeRuleConfig>,
+        ttl: Option<String>,
+        expiry: Option<String>,
     },
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct MergeConfig {
-    pub source: String,
-    pub to: String,
-}
-
-impl Config {
-    pub fn from_file(path: &str) -> anyhow::Result<Self> {
-        let config = config::Config::builder()
-            .add_source(config::File::with_name(path))
-            .add_source(config::Environment::with_prefix("PLATYPUS").separator("_"))
-            .build()?;
-
-        Ok(config.try_deserialize::<Config>()?)
-    }
-
-    pub fn to_source(&self, source: &str) -> anyhow::Result<Box<dyn Source>> {
-        let config = self
-            .source
-            .get(source)
-            .ok_or_else(|| anyhow::anyhow!("Source '{}' not found", source))?;
-
-        match config {
+impl SourceConfig {
+    pub fn to_source(&self) -> anyhow::Result<Box<dyn Source>> {
+        match self {
             SourceConfig::Awssm { .. } => Err(anyhow::anyhow!("AWSSM source not implemented yet")),
             SourceConfig::Echo { template } => {
                 let echo = Echo::new().with_template(template);
@@ -110,8 +115,67 @@ impl Config {
 
                 Ok(Box::new(http))
             }
-            SourceConfig::Map { .. } => Err(anyhow::anyhow!("Map source not implemented yet")),
+            SourceConfig::Merge {
+                format,
+                template,
+                ttl,
+                expiry,
+            } => {
+                let mut merge = source::Merge::new().with_format(format);
+
+                for r in template.iter() {
+                    merge = merge.with_rule(r.key.clone(), r.source.clone(), r.args.to_rule_args());
+                }
+
+                if let Some(ttl_str) = ttl {
+                    let ttl_duration = parse_duration(ttl_str)?;
+                    merge = merge.with_ttl(ttl_duration);
+                }
+
+                if let Some(expiry_str) = expiry {
+                    let expiry_duration = parse_duration(expiry_str)?;
+                    merge = merge.with_expiry(expiry_duration);
+                }
+
+                Ok(Box::new(merge))
+            }
         }
+    }
+}
+
+//- Route ---------------------------------------------------------------------
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RouteGroupConfig {
+    pub routes: Vec<RouteConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RouteConfig {
+    #[serde(rename = "match")]
+    pub pattern: String,
+
+    #[serde(rename = "to")]
+    pub source: String,
+}
+
+//- Service -------------------------------------------------------------------
+#[derive(Default, Clone, Deserialize, Serialize)]
+pub struct ServerConfig {
+    pub routes: HashMap<String, RouteGroupConfig>,
+
+    #[serde(rename = "source")]
+    pub source_configs: HashMap<String, SourceConfig>,
+}
+
+impl ServerConfig {
+    pub fn from_file(path: &str) -> anyhow::Result<Self> {
+        let config = config::Config::builder()
+            .add_source(config::File::with_name(path))
+            .add_source(config::Environment::with_prefix("PLATYPUS").separator("_"))
+            .build()?;
+
+        let config = config.try_deserialize::<ServerConfig>()?;
+        Ok(config)
     }
 
     pub fn to_router(&self) -> anyhow::Result<Router> {
@@ -119,11 +183,27 @@ impl Config {
 
         for (_name, route) in self.routes.iter() {
             for r in route.routes.iter() {
-                let source = self.to_source(r.source.as_str())?;
-                router = router.route(&r.pattern, source);
+                router = router.route(&r.pattern, &r.source);
             }
         }
 
         Ok(router)
+    }
+
+    pub fn to_sources(&self) -> anyhow::Result<HashMap<String, Arc<Box<dyn Source>>>> {
+        let mut sources = HashMap::new();
+        for (name, config) in self.source_configs.iter() {
+            sources.insert(name.clone(), Arc::new(config.to_source()?));
+        }
+        Ok(sources)
+    }
+}
+
+impl fmt::Debug for ServerConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Config")
+            .field("routes", &self.routes)
+            .field("source", &self.source_configs)
+            .finish()
     }
 }

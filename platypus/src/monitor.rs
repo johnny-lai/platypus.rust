@@ -1,5 +1,5 @@
 use crate::router::Router;
-use crate::{Source, Value};
+use crate::{Source, Sources, Value};
 use crate::{request::Request, response::Response, writer::Writer};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -106,6 +106,7 @@ impl MonitorTasks {
         &self,
         key: &str,
         router: Arc<Router>,
+        sources: Arc<Sources>,
         target_writer: &Option<Arc<Writer>>,
     ) -> Option<Value> {
         let mut tasks = self.tasks.lock().await;
@@ -120,14 +121,19 @@ impl MonitorTasks {
 
         debug!(key= ?key, "New MonitorTask");
         if let Some((request, rule)) = router.rule(key) {
-            let mut monitor_task = MonitorTask::new(rule.source(), request);
-            if let Some(target_writer) = target_writer {
-                monitor_task = monitor_task.with_target(target_writer.clone());
+            if let Some(source) = sources.get(rule.source()) {
+                let request_with_sources = request.with_sources(sources.clone());
+                let mut monitor_task = MonitorTask::new(source.clone(), request_with_sources);
+                if let Some(target_writer) = target_writer {
+                    monitor_task = monitor_task.with_target(target_writer.clone());
+                }
+                monitor_task.touch();
+                let value = monitor_task.get().await;
+                tasks.insert(key.to_string(), monitor_task);
+                value
+            } else {
+                None
             }
-            monitor_task.touch();
-            let value = monitor_task.get().await;
-            tasks.insert(key.to_string(), monitor_task);
-            value
         } else {
             None
         }

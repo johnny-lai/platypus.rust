@@ -1,11 +1,6 @@
 use crate::{Request, Response, replace_placeholders, response::MonitorConfig, source::Source};
 use async_trait::async_trait;
-use reqwest::{Client, Method};
-use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-use std::time::Duration;
-use tracing;
-use url::Url;
 
 pub struct Echo {
     monitor_config: MonitorConfig,
@@ -51,7 +46,7 @@ impl Source for Echo {
             .with_expiry(self.expiry())
             .with_ttl(self.ttl());
 
-        let value = crate::replace_placeholders(self.template(), request.captures());
+        let value = replace_placeholders(self.template(), request.captures());
         response.with_value(value)
     }
 }

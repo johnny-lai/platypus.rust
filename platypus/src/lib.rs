@@ -19,6 +19,7 @@ pub use router::Router;
 pub use server::Server;
 pub use service::Service;
 pub use source::Source;
+pub use source::Sources;
 pub use writer::Writer;
 
 pub use source::source;

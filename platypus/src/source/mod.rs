@@ -1,18 +1,23 @@
-use std::time::Duration;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{Request, Response};
 use async_trait::async_trait;
 
-mod echo;
+pub mod echo;
 pub use echo::Echo;
 
-mod http;
+pub mod http;
 pub use http::Http;
+
+pub mod merge;
+pub use merge::Merge;
 
 #[async_trait]
 pub trait Source: Send + Sync + 'static {
     async fn call(&self, request: &Request) -> Response;
 }
+
+pub type Sources = HashMap<String, Arc<Box<dyn Source>>>;
 
 pub struct FnGetter<F> {
     func: F,
