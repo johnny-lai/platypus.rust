@@ -1032,6 +1032,7 @@ dependencies = [
  "async-memcached",
  "memcache",
  "platypus",
+ "serde_json",
  "tokio",
 ]
 
@@ -1441,6 +1442,7 @@ dependencies = [
  "memcache",
  "regex",
  "reqwest 0.12.23",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",
