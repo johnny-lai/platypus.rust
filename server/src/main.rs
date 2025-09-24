@@ -7,7 +7,7 @@ use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod config;
-use config::Config;
+use config::ServerConfig;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
 
     // Load configuration if provided
     let config = if let Some(config_path) = &args.config {
-        Config::from_file(config_path)?
+        ServerConfig::from_file(config_path)?
     } else {
         return Err(anyhow!("No config file specified"));
     };
@@ -107,13 +107,12 @@ async fn main() -> Result<()> {
     let monitor_tasks = MonitorTasks::new();
     let monitor_tasks_for_tick = monitor_tasks.clone();
 
-    // Build router from config or use default routes
-    let router = config.to_router()?;
-
-    let handler = Service::with_monitor_tasks(monitor_tasks)
-        .router(router)
-        .target(target.as_str())
-        .version(env!("CARGO_PKG_VERSION"));
+    let handler = Service::new()
+        .version(env!("CARGO_PKG_VERSION"))
+        .with_monitor_tasks(monitor_tasks)
+        .with_router(config.to_router()?)
+        .with_sources(config.to_sources()?)
+        .with_target(target.as_str());
 
     // Keep a reference to the original service for shutdown
     let handler_for_shutdown = handler.clone();
