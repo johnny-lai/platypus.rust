@@ -249,9 +249,3 @@ template = [
 ttl = "60s"
 expiry = "300s"
 ```
-
-## Todos
-
-* Allow different `getter` based on the key accessed.
-* Allow for multiple `getter`.
-* Allow TTLs to be configured
