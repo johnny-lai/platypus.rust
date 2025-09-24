@@ -2,7 +2,7 @@ use crate::Value;
 use std::ops::{Deref, DerefMut};
 use tokio::time::{Duration, Instant};
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct MonitorConfig {
     // Duration key on the target should be kept for
     // This should be greater than interval.
