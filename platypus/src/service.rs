@@ -1,7 +1,9 @@
-use crate::protocol::{self, Command, Item, Response};
-use crate::router::Router;
-use crate::{MonitorTasks, Writer};
+use crate::{
+    MonitorTasks, Router, Sources, Writer,
+    protocol::{self, Command, Item, Response},
+};
 use anyhow::Result;
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -11,7 +13,8 @@ use tracing::info;
 
 #[derive(Clone)]
 pub struct Service {
-    router: Option<Arc<Router>>,
+    router: Arc<Router>,
+    sources: Arc<Sources>,
     monitor_tasks: MonitorTasks,
     target_writer: Option<Arc<Writer>>,
     version: String,
@@ -39,24 +42,31 @@ impl tower::Service<protocol::CommandContext> for Service {
 
 impl Service {
     pub fn new() -> Self {
-        Self::with_monitor_tasks(MonitorTasks::new())
-    }
-
-    pub fn with_monitor_tasks(monitor_tasks: MonitorTasks) -> Self {
         Self {
-            router: None,
-            monitor_tasks,
+            router: Arc::new(Router::new()),
+            sources: Arc::new(HashMap::default()),
+            monitor_tasks: MonitorTasks::new(),
             target_writer: None,
             version: "0.0.0".into(),
         }
     }
 
-    pub fn router(mut self, router: Router) -> Self {
-        self.router = Some(Arc::new(router));
+    pub fn with_monitor_tasks(mut self, monitor_tasks: MonitorTasks) -> Self {
+        self.monitor_tasks = monitor_tasks;
         self
     }
 
-    pub fn target(mut self, target_address: &str) -> Self {
+    pub fn with_router(mut self, router: Router) -> Self {
+        self.router = Arc::new(router);
+        self
+    }
+
+    pub fn with_sources(mut self, sources: Sources) -> Self {
+        self.sources = Arc::new(sources);
+        self
+    }
+
+    pub fn with_target(mut self, target_address: &str) -> Self {
         self.target_writer = Some(Arc::new(Writer::new(target_address)));
         self
     }
@@ -66,131 +76,131 @@ impl Service {
         self
     }
 
-    async fn get_or_create_monitor_task(&self, key: &str, router: Arc<Router>) -> Option<String> {
+    async fn get_or_create_monitor_task(&self, key: &str) -> Option<String> {
         self.monitor_tasks
-            .get_or_create_task(key, router, &self.target_writer)
+            .get_or_create_task(
+                key,
+                self.router.clone(),
+                self.sources.clone(),
+                &self.target_writer,
+            )
             .await
     }
 
     async fn handle_command(&self, command: Command) -> anyhow::Result<Response> {
-        if let Some(router) = &self.router {
-            match command {
-                Command::Get(keys) => {
-                    info!(keys = ?keys, "GET command");
-                    let mut items = Vec::new();
-                    for key in &keys {
-                        match self.get_or_create_monitor_task(key, router.clone()).await {
-                            Some(value) => {
-                                let item = Item {
-                                    key: key.clone(),
-                                    flags: 0,
-                                    exptime: 0,
-                                    data: value.into_bytes(),
-                                    cas: None,
-                                };
-                                items.push(item);
-                            }
-                            None => {}
+        match command {
+            Command::Get(keys) => {
+                info!(keys = ?keys, "GET command");
+                let mut items = Vec::new();
+                for key in &keys {
+                    match self.get_or_create_monitor_task(key).await {
+                        Some(value) => {
+                            let item = Item {
+                                key: key.clone(),
+                                flags: 0,
+                                exptime: 0,
+                                data: value.into_bytes(),
+                                cas: None,
+                            };
+                            items.push(item);
                         }
+                        None => {}
                     }
-                    Ok(Response::Values(items))
                 }
-                Command::Gets(keys) => {
-                    info!(keys = ?keys, "GETS command");
-                    let mut items = Vec::new();
-                    for key in &keys {
-                        match self.get_or_create_monitor_task(key, router.clone()).await {
-                            Some(value) => {
-                                let item = Item {
-                                    key: key.clone(),
-                                    flags: 0,
-                                    exptime: 0,
-                                    data: value.into_bytes(),
-                                    cas: Some(12345),
-                                };
-                                items.push(item);
-                            }
-                            None => {}
+                Ok(Response::Values(items))
+            }
+            Command::Gets(keys) => {
+                info!(keys = ?keys, "GETS command");
+                let mut items = Vec::new();
+                for key in &keys {
+                    match self.get_or_create_monitor_task(key).await {
+                        Some(value) => {
+                            let item = Item {
+                                key: key.clone(),
+                                flags: 0,
+                                exptime: 0,
+                                data: value.into_bytes(),
+                                cas: Some(12345),
+                            };
+                            items.push(item);
                         }
-                    }
-                    Ok(Response::Values(items))
-                }
-                Command::Gat(exptime, keys) => {
-                    info!(exptime = exptime, keys = ?keys, "GAT command");
-                    let mut items = Vec::new();
-                    for key in &keys {
-                        let item = Item {
-                            key: key.clone(),
-                            flags: 0,
-                            exptime,
-                            data: b"sample_value".to_vec(),
-                            cas: None,
-                        };
-                        items.push(item);
-                    }
-                    Ok(Response::Values(items))
-                }
-                Command::Gats(exptime, keys) => {
-                    info!(exptime = exptime, keys = ?keys, "GATS command");
-                    let mut items = Vec::new();
-                    for key in &keys {
-                        let item = Item {
-                            key: key.clone(),
-                            flags: 0,
-                            exptime,
-                            data: b"sample_value".to_vec(),
-                            cas: Some(12345),
-                        };
-                        items.push(item);
-                    }
-                    Ok(Response::Values(items))
-                }
-                Command::MetaGet(key, flags) => {
-                    info!(key = key, flags = ?flags, "META GET command");
-                    if let Some(value) = self.get_or_create_monitor_task(&key, router.clone()).await
-                    {
-                        let item = Item {
-                            key: key.clone(),
-                            flags: 0,
-                            exptime: 0,
-                            data: value.into_bytes(),
-                            cas: Some(12345),
-                        };
-                        Ok(Response::MetaValue(item, flags))
-                    } else {
-                        Ok(Response::MetaEnd)
+                        None => {}
                     }
                 }
-                Command::MetaNoOp => {
-                    info!("META NOOP command");
-                    Ok(Response::MetaNoOp)
+                Ok(Response::Values(items))
+            }
+            Command::Gat(exptime, keys) => {
+                info!(exptime = exptime, keys = ?keys, "GAT command");
+                let mut items = Vec::new();
+                for key in &keys {
+                    let item = Item {
+                        key: key.clone(),
+                        flags: 0,
+                        exptime,
+                        data: b"sample_value".to_vec(),
+                        cas: None,
+                    };
+                    items.push(item);
                 }
-                Command::Version => {
-                    info!("VERSION command");
-                    Ok(Response::Version(self.version.clone()))
+                Ok(Response::Values(items))
+            }
+            Command::Gats(exptime, keys) => {
+                info!(exptime = exptime, keys = ?keys, "GATS command");
+                let mut items = Vec::new();
+                for key in &keys {
+                    let item = Item {
+                        key: key.clone(),
+                        flags: 0,
+                        exptime,
+                        data: b"sample_value".to_vec(),
+                        cas: Some(12345),
+                    };
+                    items.push(item);
                 }
-                Command::Stats(arg) => {
-                    info!(arg = ?arg, "STATS command");
-                    let stats = vec![
-                        ("version".to_string(), "0.1.0".to_string()),
-                        ("curr_connections".to_string(), "1".to_string()),
-                        ("total_connections".to_string(), "1".to_string()),
-                        ("cmd_get".to_string(), "0".to_string()),
-                        ("cmd_set".to_string(), "0".to_string()),
-                    ];
-                    Ok(Response::Stats(stats))
-                }
-                Command::Touch(key, exptime) => {
-                    info!(key = key, exptime = exptime, "TOUCH command");
-                    Ok(Response::Touched)
-                }
-                Command::Quit => {
-                    info!("QUIT command - closing connection");
-                    Ok(Response::Error("Connection should close".to_string()))
+                Ok(Response::Values(items))
+            }
+            Command::MetaGet(key, flags) => {
+                info!(key = key, flags = ?flags, "META GET command");
+                if let Some(value) = self.get_or_create_monitor_task(&key).await {
+                    let item = Item {
+                        key: key.clone(),
+                        flags: 0,
+                        exptime: 0,
+                        data: value.into_bytes(),
+                        cas: Some(12345),
+                    };
+                    Ok(Response::MetaValue(item, flags))
+                } else {
+                    Ok(Response::MetaEnd)
                 }
             }
-        } else {
-            Err(anyhow::anyhow!("No getter function configured"))
+            Command::MetaNoOp => {
+                info!("META NOOP command");
+                Ok(Response::MetaNoOp)
+            }
+            Command::Version => {
+                info!("VERSION command");
+                Ok(Response::Version(self.version.clone()))
+            }
+            Command::Stats(arg) => {
+                info!(arg = ?arg, "STATS command");
+                let stats = vec![
+                    ("version".to_string(), "0.1.0".to_string()),
+                    ("curr_connections".to_string(), "1".to_string()),
+                    ("total_connections".to_string(), "1".to_string()),
+                    ("cmd_get".to_string(), "0".to_string()),
+                    ("cmd_set".to_string(), "0".to_string()),
+                ];
+                Ok(Response::Stats(stats))
+            }
+            Command::Touch(key, exptime) => {
+                info!(key = key, exptime = exptime, "TOUCH command");
+                Ok(Response::Touched)
+            }
+            Command::Quit => {
+                info!("QUIT command - closing connection");
+                Ok(Response::Error("Connection should close".to_string()))
+            }
         }
     }
 
