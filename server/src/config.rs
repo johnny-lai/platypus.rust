@@ -1,7 +1,7 @@
 use humantime::parse_duration;
 use platypus::{
     Router, Source, source,
-    source::{Echo, Http},
+    source::{AwsSecretsManager, Echo, Http},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -10,12 +10,6 @@ use std::fmt;
 use std::sync::Arc;
 
 //- Merge ---------------------------------------------------------------------
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct MergeConfig {
-    pub source: String,
-    pub to: String,
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum MergeRuleArgsConfig {
     #[serde(rename = "inherit")]
@@ -50,8 +44,9 @@ pub struct MergeRuleConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum SourceConfig {
-    Awssm {
-        key: String,
+    #[serde(rename = "aws_secrets_manager")]
+    AwsSecretsManager {
+        secret_id: String,
         ttl: Option<String>,
         expiry: Option<String>,
     },
@@ -77,7 +72,25 @@ pub enum SourceConfig {
 impl SourceConfig {
     pub fn to_source(&self) -> anyhow::Result<Box<dyn Source>> {
         match self {
-            SourceConfig::Awssm { .. } => Err(anyhow::anyhow!("AWSSM source not implemented yet")),
+            SourceConfig::AwsSecretsManager {
+                secret_id,
+                ttl,
+                expiry,
+            } => {
+                let mut source = AwsSecretsManager::new(secret_id);
+
+                if let Some(ttl_str) = ttl {
+                    let ttl_duration = parse_duration(ttl_str)?;
+                    source = source.with_ttl(ttl_duration);
+                }
+
+                if let Some(expiry_str) = expiry {
+                    let expiry_duration = parse_duration(expiry_str)?;
+                    source = source.with_expiry(expiry_duration);
+                }
+
+                Ok(Box::new(source))
+            }
             SourceConfig::Echo { template } => {
                 let echo = Echo::new().with_template(template);
                 Ok(Box::new(echo))

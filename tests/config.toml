@@ -7,6 +7,8 @@ routes = [
   { match = "^echo1/(?<path>.+)", to = "echo1" },
   { match = "^echo2/(?<path>.+)", to = "echo2" },
   { match = "^both/(?<path>.+)", to = "both" },
+
+  { match = "^secrets1/(?<path>.+)", to = "secrets1" },
 ]
 
 [source.echo1]
@@ -24,3 +26,7 @@ template = [
   { key = [ "echo1" ], source = "echo1", args = { inherit = {} } }, # args is inherited
   { key = [ "echo2" ], source = "echo2", args = { replace = { path = "{path}" } } },
 ]
+
+[source.secrets1]
+type = "aws_secrets_manager"
+secret_id = "dev/secrets1/{path}"
