@@ -12,6 +12,9 @@ pub use http::Http;
 pub mod merge;
 pub use merge::Merge;
 
+pub mod aws_secrets_manager;
+pub use aws_secrets_manager::AwsSecretsManager;
+
 #[async_trait]
 pub trait Source: Send + Sync + 'static {
     async fn call(&self, request: &Request) -> Response;

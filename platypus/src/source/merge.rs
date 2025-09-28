@@ -193,7 +193,10 @@ mod tests {
         let mut sources = HashMap::new();
         sources.insert("echo1".to_string(), create_mock_source("echo1 response"));
         sources.insert("echo2".to_string(), create_mock_source("echo2 response"));
-        sources.insert("json_source".to_string(), create_mock_source(r#"{"nested": "value"}"#));
+        sources.insert(
+            "json_source".to_string(),
+            create_mock_source(r#"{"nested": "value"}"#),
+        );
         Arc::new(sources)
     }
 
@@ -215,8 +218,11 @@ mod tests {
 
     #[test]
     fn test_merge_with_rule() {
-        let merge = Merge::new()
-            .with_rule(vec!["test".to_string()], "source1".to_string(), RuleArgs::Inherit);
+        let merge = Merge::new().with_rule(
+            vec!["test".to_string()],
+            "source1".to_string(),
+            RuleArgs::Inherit,
+        );
 
         assert_eq!(merge.rules.len(), 1);
         assert_eq!(merge.rules[0].key, vec!["test".to_string()]);
@@ -229,9 +235,7 @@ mod tests {
         let ttl = Duration::from_secs(60);
         let expiry = Duration::from_secs(300);
 
-        let merge = Merge::new()
-            .with_ttl(ttl)
-            .with_expiry(expiry);
+        let merge = Merge::new().with_ttl(ttl).with_expiry(expiry);
 
         assert_eq!(merge.ttl(), ttl);
         assert_eq!(merge.expiry(), expiry);
@@ -251,8 +255,11 @@ mod tests {
     #[tokio::test]
     async fn test_merge_inherit_single_source() {
         let sources = create_test_sources();
-        let merge = Merge::new()
-            .with_rule(vec!["result".to_string()], "echo1".to_string(), RuleArgs::Inherit);
+        let merge = Merge::new().with_rule(
+            vec!["result".to_string()],
+            "echo1".to_string(),
+            RuleArgs::Inherit,
+        );
 
         let request = Request::new("test_key").with_sources(sources);
         let response = merge.call(&request).await;
@@ -268,9 +275,11 @@ mod tests {
         let mut replace_args = HashMap::new();
         replace_args.insert("path".to_string(), "test_value".to_string());
 
-        let merge = Merge::new()
-            .with_rule(vec!["result".to_string()], "echo1".to_string(),
-                RuleArgs::Replace { args: replace_args });
+        let merge = Merge::new().with_rule(
+            vec!["result".to_string()],
+            "echo1".to_string(),
+            RuleArgs::Replace { args: replace_args },
+        );
 
         let request = Request::new("test_key").with_sources(sources);
         let response = merge.call(&request).await;
@@ -284,8 +293,16 @@ mod tests {
     async fn test_merge_multiple_sources() {
         let sources = create_test_sources();
         let merge = Merge::new()
-            .with_rule(vec!["first".to_string()], "echo1".to_string(), RuleArgs::Inherit)
-            .with_rule(vec!["second".to_string()], "echo2".to_string(), RuleArgs::Inherit);
+            .with_rule(
+                vec!["first".to_string()],
+                "echo1".to_string(),
+                RuleArgs::Inherit,
+            )
+            .with_rule(
+                vec!["second".to_string()],
+                "echo2".to_string(),
+                RuleArgs::Inherit,
+            );
 
         let request = Request::new("test_key").with_sources(sources);
         let response = merge.call(&request).await;
@@ -298,8 +315,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_no_sources_in_request() {
-        let merge = Merge::new()
-            .with_rule(vec!["result".to_string()], "echo1".to_string(), RuleArgs::Inherit);
+        let merge = Merge::new().with_rule(
+            vec!["result".to_string()],
+            "echo1".to_string(),
+            RuleArgs::Inherit,
+        );
 
         let request = Request::new("test_key"); // No sources attached
         let response = merge.call(&request).await;
@@ -311,8 +331,11 @@ mod tests {
     #[tokio::test]
     async fn test_merge_missing_source() {
         let sources = create_test_sources();
-        let merge = Merge::new()
-            .with_rule(vec!["result".to_string()], "nonexistent".to_string(), RuleArgs::Inherit);
+        let merge = Merge::new().with_rule(
+            vec!["result".to_string()],
+            "nonexistent".to_string(),
+            RuleArgs::Inherit,
+        );
 
         let request = Request::new("test_key").with_sources(sources);
         let response = merge.call(&request).await;
@@ -337,7 +360,11 @@ mod tests {
     #[test]
     fn test_set_nested_value_nested_keys() {
         let mut map = serde_json::Map::new();
-        let key_path = vec!["level1".to_string(), "level2".to_string(), "level3".to_string()];
+        let key_path = vec![
+            "level1".to_string(),
+            "level2".to_string(),
+            "level3".to_string(),
+        ];
         let value = serde_json::Value::String("deep_value".to_string());
 
         Merge::set_nested_value(&mut map, &key_path, value);
@@ -362,7 +389,10 @@ mod tests {
     #[test]
     fn test_set_nested_value_overwrite_existing() {
         let mut map = serde_json::Map::new();
-        map.insert("existing".to_string(), serde_json::Value::String("old".to_string()));
+        map.insert(
+            "existing".to_string(),
+            serde_json::Value::String("old".to_string()),
+        );
 
         let key_path = vec!["existing".to_string()];
         let value = serde_json::Value::String("new".to_string());
@@ -376,8 +406,16 @@ mod tests {
     async fn test_merge_nested_key_paths() {
         let sources = create_test_sources();
         let merge = Merge::new()
-            .with_rule(vec!["data".to_string(), "echo1".to_string()], "echo1".to_string(), RuleArgs::Inherit)
-            .with_rule(vec!["data".to_string(), "echo2".to_string()], "echo2".to_string(), RuleArgs::Inherit);
+            .with_rule(
+                vec!["data".to_string(), "echo1".to_string()],
+                "echo1".to_string(),
+                RuleArgs::Inherit,
+            )
+            .with_rule(
+                vec!["data".to_string(), "echo2".to_string()],
+                "echo2".to_string(),
+                RuleArgs::Inherit,
+            );
 
         let request = Request::new("test_key").with_sources(sources);
         let response = merge.call(&request).await;
@@ -394,9 +432,13 @@ mod tests {
         let mut sources: Sources = HashMap::new();
 
         // Create a source that returns a template using captures
-        sources.insert("template_source".to_string(), Arc::new(Box::new(
-            crate::source::Echo::new().with_template("path={path}, id={id}")
-        ) as Box<dyn Source>));
+        sources.insert(
+            "template_source".to_string(),
+            Arc::new(
+                Box::new(crate::source::Echo::new().with_template("path={path}, id={id}"))
+                    as Box<dyn Source>,
+            ),
+        );
 
         sources.insert("simple".to_string(), create_mock_source("simple response"));
         Arc::new(sources)
@@ -406,12 +448,14 @@ mod tests {
     async fn test_replace_args_placeholder_processing() {
         let sources = create_capture_aware_sources();
         let mut replace_args = HashMap::new();
-        replace_args.insert("path".to_string(), "{id}/data".to_string());  // Uses placeholder from request
-        replace_args.insert("id".to_string(), "123".to_string());           // Static value
+        replace_args.insert("path".to_string(), "{id}/data".to_string()); // Uses placeholder from request
+        replace_args.insert("id".to_string(), "123".to_string()); // Static value
 
-        let merge = Merge::new()
-            .with_rule(vec!["result".to_string()], "template_source".to_string(),
-                RuleArgs::Replace { args: replace_args });
+        let merge = Merge::new().with_rule(
+            vec!["result".to_string()],
+            "template_source".to_string(),
+            RuleArgs::Replace { args: replace_args },
+        );
 
         let mut captures = HashMap::new();
         captures.insert("id".to_string(), "456".to_string());
@@ -436,9 +480,11 @@ mod tests {
         replace_args.insert("path".to_string(), "{type}/{id}/details".to_string());
         replace_args.insert("id".to_string(), "fixed_id".to_string());
 
-        let merge = Merge::new()
-            .with_rule(vec!["result".to_string()], "template_source".to_string(),
-                RuleArgs::Replace { args: replace_args });
+        let merge = Merge::new().with_rule(
+            vec!["result".to_string()],
+            "template_source".to_string(),
+            RuleArgs::Replace { args: replace_args },
+        );
 
         let mut captures = HashMap::new();
         captures.insert("type".to_string(), "user".to_string());
@@ -463,9 +509,16 @@ mod tests {
         replace_args.insert("id".to_string(), "replaced_id".to_string());
 
         let merge = Merge::new()
-            .with_rule(vec!["inherit".to_string()], "template_source".to_string(), RuleArgs::Inherit)
-            .with_rule(vec!["replace".to_string()], "template_source".to_string(),
-                RuleArgs::Replace { args: replace_args });
+            .with_rule(
+                vec!["inherit".to_string()],
+                "template_source".to_string(),
+                RuleArgs::Inherit,
+            )
+            .with_rule(
+                vec!["replace".to_string()],
+                "template_source".to_string(),
+                RuleArgs::Replace { args: replace_args },
+            );
 
         let mut captures = HashMap::new();
         captures.insert("path".to_string(), "original_path".to_string());
@@ -490,8 +543,16 @@ mod tests {
     async fn test_merge_json_responses() {
         let sources = create_test_sources();
         let merge = Merge::new()
-            .with_rule(vec!["json_data".to_string()], "json_source".to_string(), RuleArgs::Inherit)
-            .with_rule(vec!["string_data".to_string()], "echo1".to_string(), RuleArgs::Inherit);
+            .with_rule(
+                vec!["json_data".to_string()],
+                "json_source".to_string(),
+                RuleArgs::Inherit,
+            )
+            .with_rule(
+                vec!["string_data".to_string()],
+                "echo1".to_string(),
+                RuleArgs::Inherit,
+            );
 
         let request = Request::new("test_key").with_sources(sources);
         let response = merge.call(&request).await;
@@ -508,13 +569,24 @@ mod tests {
     #[tokio::test]
     async fn test_merge_non_json_responses() {
         let mut sources: Sources = HashMap::new();
-        sources.insert("plain_text".to_string(), create_mock_source("just plain text"));
+        sources.insert(
+            "plain_text".to_string(),
+            create_mock_source("just plain text"),
+        );
         sources.insert("number_string".to_string(), create_mock_source("12345"));
         let sources = Arc::new(sources);
 
         let merge = Merge::new()
-            .with_rule(vec!["text".to_string()], "plain_text".to_string(), RuleArgs::Inherit)
-            .with_rule(vec!["number".to_string()], "number_string".to_string(), RuleArgs::Inherit);
+            .with_rule(
+                vec!["text".to_string()],
+                "plain_text".to_string(),
+                RuleArgs::Inherit,
+            )
+            .with_rule(
+                vec!["number".to_string()],
+                "number_string".to_string(),
+                RuleArgs::Inherit,
+            );
 
         let request = Request::new("test_key").with_sources(sources);
         let response = merge.call(&request).await;
@@ -529,15 +601,33 @@ mod tests {
     #[tokio::test]
     async fn test_merge_mixed_json_and_string() {
         let mut sources: Sources = HashMap::new();
-        sources.insert("json".to_string(), create_mock_source(r#"{"key": "value", "count": 42}"#));
+        sources.insert(
+            "json".to_string(),
+            create_mock_source(r#"{"key": "value", "count": 42}"#),
+        );
         sources.insert("text".to_string(), create_mock_source("plain text"));
-        sources.insert("invalid_json".to_string(), create_mock_source(r#"{"incomplete": json"#));
+        sources.insert(
+            "invalid_json".to_string(),
+            create_mock_source(r#"{"incomplete": json"#),
+        );
         let sources = Arc::new(sources);
 
         let merge = Merge::new()
-            .with_rule(vec!["valid_json".to_string()], "json".to_string(), RuleArgs::Inherit)
-            .with_rule(vec!["plain".to_string()], "text".to_string(), RuleArgs::Inherit)
-            .with_rule(vec!["broken_json".to_string()], "invalid_json".to_string(), RuleArgs::Inherit);
+            .with_rule(
+                vec!["valid_json".to_string()],
+                "json".to_string(),
+                RuleArgs::Inherit,
+            )
+            .with_rule(
+                vec!["plain".to_string()],
+                "text".to_string(),
+                RuleArgs::Inherit,
+            )
+            .with_rule(
+                vec!["broken_json".to_string()],
+                "invalid_json".to_string(),
+                RuleArgs::Inherit,
+            );
 
         let request = Request::new("test_key").with_sources(sources);
         let response = merge.call(&request).await;
@@ -546,7 +636,10 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&response.value().unwrap()).unwrap();
 
         // Valid JSON should be parsed as object
-        assert_eq!(json["valid_json"], serde_json::json!({"key": "value", "count": 42}));
+        assert_eq!(
+            json["valid_json"],
+            serde_json::json!({"key": "value", "count": 42})
+        );
         // Plain text should be stored as string
         assert_eq!(json["plain"], "plain text");
         // Invalid JSON should fall back to string
@@ -556,15 +649,24 @@ mod tests {
     #[tokio::test]
     async fn test_merge_empty_responses() {
         let mut sources: Sources = HashMap::new();
-        sources.insert("empty".to_string(), Arc::new(Box::new(
-            source(move |_key| async move { None })
-        ) as Box<dyn Source>));
+        sources.insert(
+            "empty".to_string(),
+            Arc::new(Box::new(source(move |_key| async move { None })) as Box<dyn Source>),
+        );
         sources.insert("valid".to_string(), create_mock_source("has value"));
         let sources = Arc::new(sources);
 
         let merge = Merge::new()
-            .with_rule(vec!["empty_result".to_string()], "empty".to_string(), RuleArgs::Inherit)
-            .with_rule(vec!["valid_result".to_string()], "valid".to_string(), RuleArgs::Inherit);
+            .with_rule(
+                vec!["empty_result".to_string()],
+                "empty".to_string(),
+                RuleArgs::Inherit,
+            )
+            .with_rule(
+                vec!["valid_result".to_string()],
+                "valid".to_string(),
+                RuleArgs::Inherit,
+            );
 
         let request = Request::new("test_key").with_sources(sources);
         let response = merge.call(&request).await;
@@ -583,7 +685,11 @@ mod tests {
         let sources = create_test_sources();
         let merge = Merge::new()
             .with_format("json") // Explicitly set JSON format
-            .with_rule(vec!["result".to_string()], "echo1".to_string(), RuleArgs::Inherit);
+            .with_rule(
+                vec!["result".to_string()],
+                "echo1".to_string(),
+                RuleArgs::Inherit,
+            );
 
         let request = Request::new("test_key").with_sources(sources);
         let response = merge.call(&request).await;
@@ -601,7 +707,11 @@ mod tests {
         let sources = create_test_sources();
         let merge = Merge::new()
             .with_format("unknown_format") // Unknown format should default to JSON
-            .with_rule(vec!["result".to_string()], "echo1".to_string(), RuleArgs::Inherit);
+            .with_rule(
+                vec!["result".to_string()],
+                "echo1".to_string(),
+                RuleArgs::Inherit,
+            );
 
         let request = Request::new("test_key").with_sources(sources);
         let response = merge.call(&request).await;

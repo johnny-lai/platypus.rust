@@ -1,7 +1,7 @@
+use crate::Sources;
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::Sources;
 
 #[derive(Clone)]
 pub struct Request {
@@ -12,9 +12,11 @@ pub struct Request {
 
 impl Request {
     pub fn new(key: &str) -> Self {
+        let mut captures = HashMap::new();
+        captures.insert("$key".to_string(), key.to_string());
         Self {
             key: key.into(),
-            captures: HashMap::new(),
+            captures,
             sources: None,
         }
     }
