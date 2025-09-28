@@ -58,6 +58,19 @@ The full integration tests build correctly but have timing/startup issues. The s
 - **libevent** (install via `brew install libevent` on macOS)
 - **Make** (for building memcached with proxy support)
 
+## Setup test data
+
+Before running the integration tests, please do the following:
+
+1. Start `localstack`
+2. Create `dev/secrets1/abc` secret
+   ```bash
+   aws --endpoint-url=http://localhost:4566 secretsmanager create-secret \
+       --name "dev/secrets1/abc" \
+       --description "For platypus testing" \
+       --secret-string "abc-test-value"
+   ```
+
 ## Manual Demo Testing
 
 To verify the full system works, you can run the demo manually:
