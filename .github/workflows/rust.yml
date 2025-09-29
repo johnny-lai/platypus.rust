@@ -25,6 +25,19 @@ jobs:
       - name: Set version
         run: sed -i 's/^version = "\(.*\)"$/version = "\1+${{ github.run_number }}"/' server/Cargo.toml
 
+      - name: Set up cargo cache
+        uses: actions/cache@v3
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
       # https://github.com/marketplace/actions/setup-localstack
       - name: Start LocalStack
         uses: LocalStack/setup-localstack@v0.2.3
