@@ -54,9 +54,6 @@ jobs:
             --description "For platypus testing" \
             --secret-string "abc-test-value"
 
-      - name: Build
-        run: cargo build --verbose
-
       - name: Run tests
         run: cargo test --verbose
 
