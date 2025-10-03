@@ -1,6 +1,7 @@
+use crate::pool::aws_secrets_manager::{
+    AwsSecretsManagerConnectionManager, AwsSecretsManagerPoolBuilder,
+};
 use crate::{Request, Response, replace_placeholders, response::MonitorConfig, source::Source};
-use crate::pool::aws_secrets_manager::{AwsSecretsManagerConnectionManager, AwsSecretsManagerPoolBuilder};
-use anyhow;
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
 use r2d2::Pool;
@@ -30,28 +31,13 @@ impl DerefMut for AwsSecretsManager {
 }
 
 impl AwsSecretsManager {
-    /// Create a new AwsSecretsManager with default pool settings (min_idle=0, max_size=2)
-    pub fn new() -> anyhow::Result<Self> {
-        let pool_future = AwsSecretsManagerPoolBuilder::new().build();
-
-        // Check if we're already in a runtime context
-        let pool = match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                // We're in an async context, use the current runtime
-                handle.block_on(pool_future)?
-            }
-            Err(_) => {
-                // We're not in an async context, create a new runtime
-                let rt = tokio::runtime::Runtime::new()?;
-                rt.block_on(pool_future)?
-            }
-        };
-
-        Ok(Self {
+    /// Create a new AwsSecretsManager with the provided pool
+    pub fn new(pool: Arc<Pool<AwsSecretsManagerConnectionManager>>) -> Self {
+        Self {
             monitor_config: MonitorConfig::default(),
             secret_id_template: String::new(),
             pool,
-        })
+        }
     }
 
     pub fn with_secret_id(mut self, template: &str) -> Self {
@@ -127,22 +113,29 @@ mod tests {
     use regex::Regex;
     use std::time::Duration;
 
-    #[test]
-    fn test_aws_secrets_manager_new() {
-        let awssm = AwsSecretsManager::new()
-            .expect("Failed to create AwsSecretsManager")
-            .with_secret_id("myapp/{key}");
+    #[tokio::test]
+    async fn test_aws_secrets_manager_new() {
+        let pool = AwsSecretsManagerPoolBuilder::new()
+            .build()
+            .await
+            .expect("Failed to create pool");
+
+        let awssm = AwsSecretsManager::new(pool).with_secret_id("myapp/{key}");
         assert_eq!(awssm.secret_id_template, "myapp/{key}");
         assert_eq!(awssm.pool.max_size(), 2); // Default max_size
     }
 
-    #[test]
-    fn test_aws_secrets_manager_with_ttl_and_expiry() {
+    #[tokio::test]
+    async fn test_aws_secrets_manager_with_ttl_and_expiry() {
         let ttl = Duration::from_secs(120);
         let expiry = Duration::from_secs(600);
 
-        let awssm = AwsSecretsManager::new()
-            .expect("Failed to create AwsSecretsManager")
+        let pool = AwsSecretsManagerPoolBuilder::new()
+            .build()
+            .await
+            .expect("Failed to create pool");
+
+        let awssm = AwsSecretsManager::new(pool)
             .with_secret_id("myapp/{key}")
             .with_ttl(ttl)
             .with_expiry(expiry);
@@ -151,22 +144,29 @@ mod tests {
         assert_eq!(awssm.expiry(), expiry);
     }
 
-    #[test]
-    fn test_build_secret_id_simple() {
-        let awssm = AwsSecretsManager::new()
-            .expect("Failed to create AwsSecretsManager")
-            .with_secret_id("myapp/{$key}");
+    #[tokio::test]
+    async fn test_build_secret_id_simple() {
+        let pool = AwsSecretsManagerPoolBuilder::new()
+            .build()
+            .await
+            .expect("Failed to create pool");
+
+        let awssm = AwsSecretsManager::new(pool).with_secret_id("myapp/{$key}");
         let request = Request::new("database_password");
 
         let secret_id = awssm.build_secret_id(&request);
         assert_eq!(secret_id, "myapp/database_password");
     }
 
-    #[test]
-    fn test_build_secret_id_with_captures() {
-        let awssm = AwsSecretsManager::new()
-            .expect("Failed to create AwsSecretsManager")
-            .with_secret_id("myapp/{environment}/{service}/{key}");
+    #[tokio::test]
+    async fn test_build_secret_id_with_captures() {
+        let pool = AwsSecretsManagerPoolBuilder::new()
+            .build()
+            .await
+            .expect("Failed to create pool");
+
+        let awssm =
+            AwsSecretsManager::new(pool).with_secret_id("myapp/{environment}/{service}/{key}");
         let re = Regex::new(r"^(?<environment>[^/]+)/(?<service>[^/]+)/(?<key>.+)$").unwrap();
         let request = Request::match_regex(&re, "prod/api/database_password").unwrap();
 
@@ -174,11 +174,14 @@ mod tests {
         assert_eq!(secret_id, "myapp/prod/api/database_password");
     }
 
-    #[test]
-    fn test_build_secret_id_missing_capture() {
-        let awssm = AwsSecretsManager::new()
-            .expect("Failed to create AwsSecretsManager")
-            .with_secret_id("myapp/{environment}/{$key}");
+    #[tokio::test]
+    async fn test_build_secret_id_missing_capture() {
+        let pool = AwsSecretsManagerPoolBuilder::new()
+            .build()
+            .await
+            .expect("Failed to create pool");
+
+        let awssm = AwsSecretsManager::new(pool).with_secret_id("myapp/{environment}/{$key}");
         let request = Request::new("simple_key");
 
         // Should still work, missing placeholders will be removed
@@ -186,10 +189,14 @@ mod tests {
         assert_eq!(secret_id, "myapp//simple_key");
     }
 
-    #[test]
-    fn test_deref_behavior() {
-        let awssm = AwsSecretsManager::new()
-            .expect("Failed to create AwsSecretsManager")
+    #[tokio::test]
+    async fn test_deref_behavior() {
+        let pool = AwsSecretsManagerPoolBuilder::new()
+            .build()
+            .await
+            .expect("Failed to create pool");
+
+        let awssm = AwsSecretsManager::new(pool)
             .with_secret_id("myapp/{$key}")
             .with_ttl(Duration::from_secs(180))
             .with_expiry(Duration::from_secs(900));

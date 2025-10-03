@@ -1,7 +1,6 @@
 use humantime::parse_duration;
 use platypus::{
-    AwsSecretsManagerConnectionManager, AwsSecretsManagerPoolBuilder,
-    Router, Source, source,
+    AwsSecretsManagerConnectionManager, AwsSecretsManagerPoolBuilder, Router, Source, source,
     source::{AwsSecretsManager, Echo, Http},
 };
 use r2d2::Pool;
@@ -119,7 +118,10 @@ pub enum SourceConfig {
 }
 
 impl SourceConfig {
-    pub fn to_source(&self, pools: &HashMap<String, Arc<Pool<AwsSecretsManagerConnectionManager>>>) -> anyhow::Result<Box<dyn Source>> {
+    pub fn to_source(
+        &self,
+        pools: &HashMap<String, Arc<Pool<AwsSecretsManagerConnectionManager>>>,
+    ) -> anyhow::Result<Box<dyn Source>> {
         match self {
             SourceConfig::AwsSecretsManager {
                 secret_id,
@@ -127,16 +129,19 @@ impl SourceConfig {
                 ttl,
                 expiry,
             } => {
-                let mut source = AwsSecretsManager::new()?.with_secret_id(secret_id);
+                // Get the pool - either specified or  create default
+                let pool_ref = if let Some(pool_name) = pool {
+                    pools
+                        .get(pool_name)
+                        .ok_or_else(|| anyhow::anyhow!("Pool '{}' not found", pool_name))?
+                        .clone()
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "AwsSecretsManager source requires a pool to be specified"
+                    ));
+                };
 
-                // If a pool name is specified, use that pool; otherwise use the default pool created by new()
-                if let Some(pool_name) = pool {
-                    if let Some(pool_ref) = pools.get(pool_name) {
-                        source = source.with_pool(pool_ref.clone());
-                    } else {
-                        return Err(anyhow::anyhow!("Pool '{}' not found", pool_name));
-                    }
-                }
+                let mut source = AwsSecretsManager::new(pool_ref).with_secret_id(secret_id);
 
                 if let Some(ttl_str) = ttl {
                     let ttl_duration = parse_duration(ttl_str)?;
@@ -253,7 +258,9 @@ impl ServerConfig {
         Ok(config)
     }
 
-    pub async fn build_pools(&self) -> anyhow::Result<HashMap<String, Arc<Pool<AwsSecretsManagerConnectionManager>>>> {
+    pub async fn build_pools(
+        &self,
+    ) -> anyhow::Result<HashMap<String, Arc<Pool<AwsSecretsManagerConnectionManager>>>> {
         let mut pools = HashMap::new();
         for (name, pool_config) in self.pool_configs.iter() {
             let pool = pool_config.to_pool().await?;
@@ -274,7 +281,10 @@ impl ServerConfig {
         Ok(router)
     }
 
-    pub fn to_sources(&self, pools: &HashMap<String, Arc<Pool<AwsSecretsManagerConnectionManager>>>) -> anyhow::Result<HashMap<String, Arc<Box<dyn Source>>>> {
+    pub fn to_sources(
+        &self,
+        pools: &HashMap<String, Arc<Pool<AwsSecretsManagerConnectionManager>>>,
+    ) -> anyhow::Result<HashMap<String, Arc<Box<dyn Source>>>> {
         let mut sources = HashMap::new();
         for (name, config) in self.source_configs.iter() {
             sources.insert(name.clone(), Arc::new(config.to_source(pools)?));
