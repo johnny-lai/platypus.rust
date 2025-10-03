@@ -2020,6 +2020,7 @@ dependencies = [
  "futures",
  "log",
  "memcache",
+ "r2d2",
  "regex",
  "reqwest 0.12.23",
  "serde",
