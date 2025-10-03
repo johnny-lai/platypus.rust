@@ -26,6 +26,35 @@ struct TestPorts {
     cold_port: u16,
 }
 
+// RAII wrapper for Child processes to ensure cleanup on drop
+struct ProcessGuard {
+    child: Option<Child>,
+    name: String,
+}
+
+impl ProcessGuard {
+    fn new(child: Child, name: String) -> Self {
+        Self {
+            child: Some(child),
+            name,
+        }
+    }
+
+    fn take(mut self) -> Child {
+        self.child.take().expect("Process already taken")
+    }
+}
+
+impl Drop for ProcessGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+            eprintln!("🧹 Cleaned up {} process during early drop", self.name);
+        }
+    }
+}
+
 pub struct TestServices {
     proxy_process: Child,
     warm_process: Child,
@@ -35,62 +64,68 @@ pub struct TestServices {
 
 impl Drop for TestServices {
     fn drop(&mut self) {
-        // Kill processes in reverse order (platypus -> warm -> proxy)
-        // This ensures proper shutdown sequence
-        let _ = self.platypus_process.kill();
-        let _ = self.warm_process.kill();
-        let _ = self.proxy_process.kill();
+        // Use panic::catch_unwind to ensure cleanup continues even if any step panics
+        let cleanup = || {
+            // Kill processes in reverse order (platypus -> warm -> proxy)
+            // This ensures proper shutdown sequence
+            let _ = self.platypus_process.kill();
+            let _ = self.warm_process.kill();
+            let _ = self.proxy_process.kill();
 
-        // Wait for processes to terminate with timeout
-        let wait_timeout = Duration::from_secs(3);
-        let start = std::time::Instant::now();
+            // Wait for processes to terminate with timeout
+            let wait_timeout = Duration::from_secs(3);
+            let start = std::time::Instant::now();
 
-        while start.elapsed() < wait_timeout {
-            let mut all_done = true;
+            while start.elapsed() < wait_timeout {
+                let mut all_done = true;
 
-            // Try to wait for each process with no blocking
-            match self.platypus_process.try_wait() {
-                Ok(Some(_)) => {}             // Process has exited
-                Ok(None) => all_done = false, // Process still running
-                Err(_) => {}                  // Process already dead or other error
+                // Try to wait for each process with no blocking
+                match self.platypus_process.try_wait() {
+                    Ok(Some(_)) => {}             // Process has exited
+                    Ok(None) => all_done = false, // Process still running
+                    Err(_) => {}                  // Process already dead or other error
+                }
+
+                match self.warm_process.try_wait() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => all_done = false,
+                    Err(_) => {}
+                }
+
+                match self.proxy_process.try_wait() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => all_done = false,
+                    Err(_) => {}
+                }
+
+                if all_done {
+                    break;
+                }
+
+                std::thread::sleep(Duration::from_millis(100));
             }
 
-            match self.warm_process.try_wait() {
-                Ok(Some(_)) => {}
-                Ok(None) => all_done = false,
-                Err(_) => {}
-            }
+            // Force kill if still running
+            let _ = self.platypus_process.kill();
+            let _ = self.warm_process.kill();
+            let _ = self.proxy_process.kill();
 
-            match self.proxy_process.try_wait() {
-                Ok(Some(_)) => {}
-                Ok(None) => all_done = false,
-                Err(_) => {}
-            }
+            // Final wait
+            let _ = self.platypus_process.wait();
+            let _ = self.warm_process.wait();
+            let _ = self.proxy_process.wait();
 
-            if all_done {
-                break;
-            }
-
+            // Give OS time to release ports
             std::thread::sleep(Duration::from_millis(100));
-        }
 
-        // Force kill if still running
-        let _ = self.platypus_process.kill();
-        let _ = self.warm_process.kill();
-        let _ = self.proxy_process.kill();
+            println!(
+                "✅ Cleaned up test services (ports: proxy={}, warm={}, platypus={})",
+                self.ports.proxy_port, self.ports.warm_port, self.ports.cold_port
+            );
+        };
 
-        // Final wait
-        let _ = self.platypus_process.wait();
-        let _ = self.warm_process.wait();
-        let _ = self.proxy_process.wait();
-
-        // Give OS time to release ports
-        std::thread::sleep(Duration::from_millis(100));
-
-        println!(
-            "✅ Cleaned up test services (ports: proxy={}, warm={}, platypus={})",
-            self.ports.proxy_port, self.ports.warm_port, self.ports.cold_port
-        );
+        // Run cleanup with panic protection
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup));
     }
 }
 
@@ -135,31 +170,37 @@ impl TestServices {
         let config_path = format!("/tmp/platypus_test_config_{}.lua", ports.proxy_port);
         std::fs::write(&config_path, config_content).expect("Failed to write test config");
 
-        // Start proxy memcached
+        // Start proxy memcached - wrapped in guard for auto-cleanup on panic
         let memcached_path = setup_memcached().await;
-        let proxy_process = Command::new(memcached_path.as_path())
-            .args(&[
-                "-l",
-                "127.0.0.1",
-                "-p",
-                &ports.proxy_port.to_string(),
-                "-o",
-                &format!("proxy_config=routelib,proxy_arg={}", config_path),
-            ])
-            .stdin(Stdio::null())
-            //.stdout(Stdio::null())
-            //.stderr(Stdio::null())
-            .spawn()
-            .expect("Failed to start proxy memcached");
+        let proxy_guard = ProcessGuard::new(
+            Command::new(memcached_path.as_path())
+                .args(&[
+                    "-l",
+                    "127.0.0.1",
+                    "-p",
+                    &ports.proxy_port.to_string(),
+                    "-o",
+                    &format!("proxy_config=routelib,proxy_arg={}", config_path),
+                ])
+                .stdin(Stdio::null())
+                //.stdout(Stdio::null())
+                //.stderr(Stdio::null())
+                .spawn()
+                .expect("Failed to start proxy memcached"),
+            "proxy_memcached".to_string(),
+        );
 
-        // Start warm cache memcached
-        let warm_process = Command::new(memcached_path)
-            .args(&["-l", "127.0.0.1", "-p", &ports.warm_port.to_string()])
-            .stdin(Stdio::null())
-            //.stdout(Stdio::null())
-            //.stderr(Stdio::null())
-            .spawn()
-            .expect("Failed to start warm cache memcached");
+        // Start warm cache memcached - wrapped in guard for auto-cleanup on panic
+        let warm_guard = ProcessGuard::new(
+            Command::new(memcached_path)
+                .args(&["-l", "127.0.0.1", "-p", &ports.warm_port.to_string()])
+                .stdin(Stdio::null())
+                //.stdout(Stdio::null())
+                //.stderr(Stdio::null())
+                .spawn()
+                .expect("Failed to start warm cache memcached"),
+            "warm_memcached".to_string(),
+        );
 
         // Wait for memcached services to be ready
         wait_for_service_ready(ports.proxy_port, 2)
@@ -169,26 +210,29 @@ impl TestServices {
             .await
             .expect("Warm cache memcached failed to start");
 
-        // Start platypus server
-        let platypus_process = Command::new("target/debug/server")
-            .args(&[
-                "-b",
-                &format!("127.0.0.1:{}", ports.cold_port),
-                "-t",
-                &format!("memcache://127.0.0.1:{}", ports.warm_port),
-                "-c",
-                "tests/config.toml",
-            ])
-            .current_dir(root_dir) // Run from workspace root
-            .stdin(Stdio::null())
-            //.stdout(Stdio::out())
-            //.stderr(Stdio::piped()) // Capture stderr for debugging
-            .env("AWS_ENDPOINT_URL", "http://localhost:4566")
-            .env("AWS_ACCESS_KEY_ID", "test")
-            .env("AWS_SECRET_ACCESS_KEY", "test")
-            .env("AWS_DEFAULT_REGION", "us-east-1")
-            .spawn()
-            .expect("Failed to start platypus server");
+        // Start platypus server - wrapped in guard for auto-cleanup on panic
+        let platypus_guard = ProcessGuard::new(
+            Command::new("target/debug/server")
+                .args(&[
+                    "-b",
+                    &format!("127.0.0.1:{}", ports.cold_port),
+                    "-t",
+                    &format!("memcache://127.0.0.1:{}", ports.warm_port),
+                    "-c",
+                    "tests/config.toml",
+                ])
+                .current_dir(root_dir) // Run from workspace root
+                .stdin(Stdio::null())
+                //.stdout(Stdio::out())
+                //.stderr(Stdio::piped()) // Capture stderr for debugging
+                .env("AWS_ENDPOINT_URL", "http://localhost:4566")
+                .env("AWS_ACCESS_KEY_ID", "test")
+                .env("AWS_SECRET_ACCESS_KEY", "test")
+                .env("AWS_DEFAULT_REGION", "us-east-1")
+                .spawn()
+                .expect("Failed to start platypus server"),
+            "platypus_server".to_string(),
+        );
 
         // Wait for platypus to be ready
         wait_for_service_ready(ports.cold_port, 10)
@@ -200,10 +244,11 @@ impl TestServices {
         // Need to wait until memcached-proxy detects platypus
         sleep(Duration::from_secs(5)).await;
 
+        // Extract processes from guards - guards will not clean up now
         TestServices {
-            proxy_process,
-            warm_process,
-            platypus_process,
+            proxy_process: proxy_guard.take(),
+            warm_process: warm_guard.take(),
+            platypus_process: platypus_guard.take(),
             ports,
         }
     }
