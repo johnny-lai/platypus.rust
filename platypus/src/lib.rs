@@ -14,7 +14,7 @@ pub mod source;
 pub mod writer;
 
 pub use monitor::{MonitorTask, MonitorTasks};
-pub use pool::AwsSecretsManagerConnectionManager;
+pub use pool::{AwsSecretsManagerConnectionManager, AwsSecretsManagerPoolBuilder};
 pub use request::Request;
 pub use response::Response;
 pub use router::Router;

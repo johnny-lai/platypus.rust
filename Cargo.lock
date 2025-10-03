@@ -2586,6 +2586,7 @@ dependencies = [
  "humantime",
  "log",
  "platypus",
+ "r2d2",
  "serde",
  "tokio",
  "tokio-util",

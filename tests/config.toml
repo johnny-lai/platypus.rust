@@ -30,3 +30,9 @@ template = [
 [source.secrets1]
 type = "aws_secrets_manager"
 secret_id = "dev/secrets1/{path}"
+pool = "awssm"
+
+[pool.awssm]
+type = "aws_secrets_manager"
+min_idle = 1
+max_size = 10
