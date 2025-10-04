@@ -101,6 +101,10 @@ async fn main() -> Result<()> {
 
     info!(config = ?config, "Server starting");
 
+    // Build connection pools
+    let pools = config.build_pools().await?;
+    info!(pool_count = pools.len(), "Connection pools initialized");
+
     // Determine target from CLI args
     let target = args.target.clone();
 
@@ -111,7 +115,7 @@ async fn main() -> Result<()> {
         .version(env!("CARGO_PKG_VERSION"))
         .with_monitor_tasks(monitor_tasks)
         .with_router(config.to_router()?)
-        .with_sources(config.to_sources()?)
+        .with_sources(config.to_sources(&pools)?)
         .with_target(target.as_str());
 
     // Keep a reference to the original service for shutdown

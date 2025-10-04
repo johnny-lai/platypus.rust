@@ -1,8 +1,9 @@
 use humantime::parse_duration;
 use platypus::{
-    Router, Source, source,
+    AwsSecretsManagerConnectionManager, AwsSecretsManagerPoolBuilder, Router, Source, source,
     source::{AwsSecretsManager, Echo, Http},
 };
+use r2d2::Pool;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::default::Default;
@@ -40,6 +41,52 @@ pub struct MergeRuleConfig {
     pub args: MergeRuleArgsConfig,
 }
 
+//- Pool ----------------------------------------------------------------------
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum PoolConfig {
+    #[serde(rename = "aws_secrets_manager")]
+    AwsSecretsManager {
+        min_idle: Option<u32>,
+        max_size: Option<u32>,
+        profile: Option<String>,
+        region: Option<String>,
+    },
+}
+
+impl PoolConfig {
+    pub async fn to_pool(&self) -> anyhow::Result<Arc<Pool<AwsSecretsManagerConnectionManager>>> {
+        match self {
+            PoolConfig::AwsSecretsManager {
+                min_idle,
+                max_size,
+                profile,
+                region,
+            } => {
+                let mut builder = AwsSecretsManagerPoolBuilder::new();
+
+                if let Some(max) = max_size {
+                    builder = builder.with_max_size(*max);
+                }
+
+                if let Some(min) = min_idle {
+                    builder = builder.with_min_idle(*min);
+                }
+
+                if let Some(prof) = profile {
+                    builder = builder.with_profile(prof);
+                }
+
+                if let Some(reg) = region {
+                    builder = builder.with_region(reg);
+                }
+
+                builder.build().await
+            }
+        }
+    }
+}
+
 //- Source --------------------------------------------------------------------
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -47,6 +94,7 @@ pub enum SourceConfig {
     #[serde(rename = "aws_secrets_manager")]
     AwsSecretsManager {
         secret_id: String,
+        pool: Option<String>,
         ttl: Option<String>,
         expiry: Option<String>,
     },
@@ -70,14 +118,30 @@ pub enum SourceConfig {
 }
 
 impl SourceConfig {
-    pub fn to_source(&self) -> anyhow::Result<Box<dyn Source>> {
+    pub fn to_source(
+        &self,
+        pools: &HashMap<String, Arc<Pool<AwsSecretsManagerConnectionManager>>>,
+    ) -> anyhow::Result<Box<dyn Source>> {
         match self {
             SourceConfig::AwsSecretsManager {
                 secret_id,
+                pool,
                 ttl,
                 expiry,
             } => {
-                let mut source = AwsSecretsManager::new(secret_id);
+                // Get the pool - either specified or  create default
+                let pool_ref = if let Some(pool_name) = pool {
+                    pools
+                        .get(pool_name)
+                        .ok_or_else(|| anyhow::anyhow!("Pool '{}' not found", pool_name))?
+                        .clone()
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "AwsSecretsManager source requires a pool to be specified"
+                    ));
+                };
+
+                let mut source = AwsSecretsManager::new(pool_ref).with_secret_id(secret_id);
 
                 if let Some(ttl_str) = ttl {
                     let ttl_duration = parse_duration(ttl_str)?;
@@ -178,6 +242,9 @@ pub struct ServerConfig {
 
     #[serde(rename = "source")]
     pub source_configs: HashMap<String, SourceConfig>,
+
+    #[serde(rename = "pool", default)]
+    pub pool_configs: HashMap<String, PoolConfig>,
 }
 
 impl ServerConfig {
@@ -189,6 +256,17 @@ impl ServerConfig {
 
         let config = config.try_deserialize::<ServerConfig>()?;
         Ok(config)
+    }
+
+    pub async fn build_pools(
+        &self,
+    ) -> anyhow::Result<HashMap<String, Arc<Pool<AwsSecretsManagerConnectionManager>>>> {
+        let mut pools = HashMap::new();
+        for (name, pool_config) in self.pool_configs.iter() {
+            let pool = pool_config.to_pool().await?;
+            pools.insert(name.clone(), pool);
+        }
+        Ok(pools)
     }
 
     pub fn to_router(&self) -> anyhow::Result<Router> {
@@ -203,10 +281,13 @@ impl ServerConfig {
         Ok(router)
     }
 
-    pub fn to_sources(&self) -> anyhow::Result<HashMap<String, Arc<Box<dyn Source>>>> {
+    pub fn to_sources(
+        &self,
+        pools: &HashMap<String, Arc<Pool<AwsSecretsManagerConnectionManager>>>,
+    ) -> anyhow::Result<HashMap<String, Arc<Box<dyn Source>>>> {
         let mut sources = HashMap::new();
         for (name, config) in self.source_configs.iter() {
-            sources.insert(name.clone(), Arc::new(config.to_source()?));
+            sources.insert(name.clone(), Arc::new(config.to_source(pools)?));
         }
         Ok(sources)
     }

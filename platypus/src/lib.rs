@@ -3,6 +3,7 @@ use std::pin::Pin;
 use thiserror::Error;
 
 pub mod monitor;
+pub mod pool;
 pub mod protocol;
 pub mod request;
 pub mod response;
@@ -13,6 +14,7 @@ pub mod source;
 pub mod writer;
 
 pub use monitor::{MonitorTask, MonitorTasks};
+pub use pool::{AwsSecretsManagerConnectionManager, AwsSecretsManagerPoolBuilder};
 pub use request::Request;
 pub use response::Response;
 pub use router::Router;
