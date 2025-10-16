@@ -37,6 +37,7 @@ impl MonitorConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct Response {
     monitor_config: MonitorConfig,
 

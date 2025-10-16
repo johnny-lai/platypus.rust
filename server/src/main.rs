@@ -24,6 +24,10 @@ struct Args {
     #[arg(short, long, default_value = "memcache://127.0.0.1:11213")]
     target: String,
 
+    /// Maximum cache size in bytes (default: 100MB)
+    #[arg(long, default_value = "104857600")]
+    cache_max_bytes: u64,
+
     /// Log format: json or text
     #[arg(long, default_value = "text")]
     log_format: String,
@@ -108,7 +112,7 @@ async fn main() -> Result<()> {
     // Determine target from CLI args
     let target = args.target.clone();
 
-    let monitor_tasks = MonitorTasks::new();
+    let monitor_tasks = MonitorTasks::with_max_bytes(args.cache_max_bytes);
     let monitor_tasks_for_tick = monitor_tasks.clone();
 
     let handler = Service::new()
