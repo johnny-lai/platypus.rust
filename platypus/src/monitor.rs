@@ -120,9 +120,9 @@ pub struct MonitorTasks {
 }
 
 impl MonitorTasks {
-    /// Creates a new MonitorTasks with a default max memory size of 100MB
+    /// Creates a new MonitorTasks with a default max memory size of 10MB
     pub fn new() -> Self {
-        Self::with_max_bytes(100 * 1024 * 1024)
+        Self::with_max_bytes(10 * 1024 * 1024)
     }
 
     /// Creates a new MonitorTasks with a specified max memory size in bytes

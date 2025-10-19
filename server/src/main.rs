@@ -24,8 +24,8 @@ struct Args {
     #[arg(short, long, default_value = "memcache://127.0.0.1:11213")]
     target: String,
 
-    /// Maximum cache size in bytes (default: 100MB)
-    #[arg(long, default_value = "104857600")]
+    /// Maximum cache size in bytes (default: 10MB)
+    #[arg(long, default_value = "10485760")]
     cache_max_bytes: u64,
 
     /// Log format: json or text
