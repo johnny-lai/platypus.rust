@@ -1,6 +1,6 @@
-use crate::pool::aws_secrets_manager::{
-    AwsSecretsManagerConnectionManager, AwsSecretsManagerPoolBuilder,
-};
+use crate::pool::aws_secrets_manager::AwsSecretsManagerConnectionManager;
+#[cfg(test)]
+use crate::pool::aws_secrets_manager::AwsSecretsManagerPoolBuilder;
 use crate::{Request, Response, replace_placeholders, response::MonitorConfig, source::Source};
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
