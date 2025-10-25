@@ -6,6 +6,9 @@ use async_trait::async_trait;
 pub mod echo;
 pub use echo::Echo;
 
+pub mod file;
+pub use file::File;
+
 pub mod http;
 pub use http::Http;
 

@@ -1,7 +1,7 @@
 use humantime::parse_duration;
 use platypus::{
     AwsSecretsManagerConnectionManager, AwsSecretsManagerPoolBuilder, Router, Source, source,
-    source::{AwsSecretsManager, Echo, Http},
+    source::{AwsSecretsManager, Echo, File, Http},
 };
 use r2d2::Pool;
 use serde::{Deserialize, Serialize};
@@ -101,6 +101,11 @@ pub enum SourceConfig {
     Echo {
         template: String,
     },
+    File {
+        path: String,
+        ttl: Option<String>,
+        expiry: Option<String>,
+    },
     Http {
         url: String,
         method: Option<String>,
@@ -158,6 +163,21 @@ impl SourceConfig {
             SourceConfig::Echo { template } => {
                 let echo = Echo::new().with_template(template);
                 Ok(Box::new(echo))
+            }
+            SourceConfig::File { path, ttl, expiry } => {
+                let mut file = File::new(path);
+
+                if let Some(ttl_str) = ttl {
+                    let ttl_duration = parse_duration(ttl_str)?;
+                    file = file.with_ttl(ttl_duration);
+                }
+
+                if let Some(expiry_str) = expiry {
+                    let expiry_duration = parse_duration(expiry_str)?;
+                    file = file.with_expiry(expiry_duration);
+                }
+
+                Ok(Box::new(file))
             }
             SourceConfig::Http {
                 url,
